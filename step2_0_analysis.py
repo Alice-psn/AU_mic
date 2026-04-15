@@ -41,7 +41,7 @@ root2 = 'C:/Users/alice/Documents/Stage Suède/data2/'
 FLAG TO activate if you are working with files A11, A12,  B11 in order to 
 cut the strange structure which compare insiede the image.
 """
-file_name ="A27"
+file_name ="B11"
 
 """
 Creation of the list of files whcih you want analyse: 
@@ -75,17 +75,16 @@ print(files1)
 
 
 
-j=0
-
 len_spectrum = len(files1) 
-vel_shift = np.empty(40)
-vel = np.empty(40)
-FWHM = np.empty(40)
-FWHM_for= np.empty(40)
-barycorr = np.zeros(40, dtype=object) 
-group_spec = np.empty([40,3000])
-group_psf =  np.empty([40,3000])
-one_frame_spec = np.empty([40,3000])
+vel_shift = np.empty(len_spectrum)
+vel = np.empty(len_spectrum)
+FWHM = np.empty(len_spectrum)
+FWHM_for= np.empty(len_spectrum)
+barycorr = np.zeros(len_spectrum, dtype=object) 
+group_spec = np.empty([len_spectrum,3000])
+group_psf =  np.empty([len_spectrum,3000])
+one_frame_spec = np.empty([len_spectrum,3000])
+w_shift = np.empty([len_spectrum,3000])
 
 master_wavelength = [] #np.empty([40,3000])
 master_spec = []
@@ -98,33 +97,32 @@ eso = coord.EarthLocation.from_geodetic(lat = 70.416666667*u.deg ,
 
 
 
-for file1 in files1:
-    file_path = os.path.join(root, files[j])
+for j, (file, file1) in enumerate(zip(files, files1)):
+    file_path = os.path.join(root, file)
     print(file_path)
     udata = np.load(file_path, allow_pickle=True)# data with r correction and sorted by w
     file1_path = os.path.join(root1, file1)
-    data_file1 = open(file1_path, 'rb')
+    with open(file1_path, 'rb') as data_file1:
+        psf_spl, spec_spl, spec, err_spec, weight, wavelength = pickle.load(data_file1)
     print(file1_path)
-    psf_spl, spec_spl, spec, err_spec, weight, wavelength = pickle.load(data_file1)
-    w_ind = np.argsort(udata['w'])
+    w_ind = np.argsort(udata['w']) #utilité si udata deja trié par w ?
     wdata = udata[w_ind]
     r_ind = np.argsort(udata['r'])
     rdata = udata[r_ind]
     
-    print("AU Mic code is running with '", files[j], "':" )
+    print("AU Mic code is running with '", file, "':" )
     print("and with '", file1, "':" )
     
     """Studing of the DATA NOISY through the FWHM of the psf"""  
     FWHM[j], FWHM_for[j], star_position = spec_fun.FWHM_estimation(udata, psf_spl)
     
     
-    print("w of udata", wdata['w'])
+    #print("w of udata", wdata['w'])
          
     """Studing of OBSERVATION EPOCHS and TELLURIC LINES """    
     w = np.linspace(wdata['w'][2000],wdata['w'][-2000], 3000)
-    print("w of file1: ",w)
+    #print("w of file1: ",w)
     r = np.linspace(rdata['r'][2000],rdata['r'][-2000], 3000)
-    w_shift = np.empty([40,3000])
     vel_array = np.linspace(-10.0,10.0,2000)
     group_spec[j,:]=spec_spl(w)#array to produce image of all the spectrums
     group_psf[j,:]=psf_spl(r)
@@ -133,7 +131,7 @@ for file1 in files1:
         #mean_reference_spec = np.mean(reference_spec)
         #reference_spec/= mean_reference_spec
         ccf_array=spec_fun.cross_correlation_velocity_clump(w, reference_spec, 
-                                                        spec_spl, vel_array)
+                                                        spec_spl, vel_array) #peu utile car on doit trouver v=0
         #plot_func.plot_spectrum(udata, reference_spec, spec_spl)
         mean_ccf = np.mean(ccf_array)
         #plot_func.plot_ccf(vel_array, ccf_array/mean_ccf)
@@ -141,8 +139,8 @@ for file1 in files1:
         vel_shift[j] = vel_array[ind_max]
         barycorr= spec_fun.Barycentric_Correction(aumic, eso, j)
 
-        vel[j] = -barycorr.value  
-        print(vel[j])
+        vel[j] = -barycorr.value
+        #print(vel[j])
         wavelength_shift = spec_fun.doppler_shift(wavelength, -vel[j])
         w_shift[j,:] = spec_fun.doppler_shift(w, vel[j])
         one_frame_spec[j,:]=spec_spl(w_shift[j,:])
@@ -154,26 +152,23 @@ for file1 in files1:
         #plot_func.plot_ccf(vel_array, ccf_array)
         ind_max = ccf_array.argmax()
         vel_shift[j] = vel_array[ind_max]
+        print('v_shift',vel_shift[j])
         barycorr= spec_fun.Barycentric_Correction(aumic, eso, j)
-        print(barycorr)
+        #print(barycorr)
         vel[j] = -barycorr.value 
-        print(vel[j])
+        #print(vel[j])
         wavelength_shift = spec_fun.doppler_shift(wavelength, -vel[j])
         w_shift[j,:] = spec_fun.doppler_shift(w, vel[j])
         one_frame_spec[j,:]=spec_spl(w_shift[j,:])#array to produce the image of all the spectrum in an unique frame
     
-    print(len(spec))
+    #print('len(spec)',len(spec))
     master_spec.extend(spec/np.median(spec))
     master_wavelength.extend(wavelength)    
     master_weight.extend(weight)
     
     
-    j+=1
-
-
-
-print(np.asarray(master_spec).shape)
-print(len(master_wavelength))
+#print(np.asarray(master_spec).shape)
+#print(len(master_wavelength))
 
 """PLOT of the Velocity shift:"""
 #plot_func.plot_velocity_shift(vel_shift)   
@@ -188,17 +183,17 @@ plot_func.plot_group_psf(group_psf,rdata,len_spectrum)
 
 
 """PLOT of all the spectrums in an UNIQUE REFERENCE FRAME"""
-one_frame_spec/=np.median(one_frame_spec[:3,:], axis = 1)[:,None]#normalization #modif
+one_frame_spec/=np.median(one_frame_spec, axis = 1)[:,None]#normalization
 plot_func.plot_image_group_spec(one_frame_spec,wdata)
 plot_func.plot_group_spec(one_frame_spec,w,len_spectrum) #modif
 
 
 """TELLURIC LINES detection:"""
 std_flux = np.std(one_frame_spec, axis=0)
-print(one_frame_spec)
-print('std',std_flux)
+#print(one_frame_spec)
+#print('std',std_flux)
 mean_std_flux = np.mean(std_flux)
-print(len(std_flux))
+#print(len(std_flux))
 w_for_cut = np.linspace(wdata['w'][2000],wdata['w'][-2000], 3000)
 
 plot_func.plot_std(wdata,std_flux, mean_std_flux)
@@ -208,10 +203,8 @@ limit =  0.042
 dw = 0.1
 w_no_tell, std_flux, w_telluric = spec_fun.telluric_lines_cut(w_for_cut, std_flux, limit , dw)
 
-    
-data_file1.close()
 #PLOT of the standard deviation after removal:
-plot_func.plot_std_no_tell(w_no_tell, w_telluric ,std_flux, limit)  
+#plot_func.plot_std_no_tell(w_no_tell, w_telluric ,std_flux, limit)  
     
 w_copy = np.linspace(wdata['w'][2000],wdata['w'][-2000], 3000)
 cut_w = w_copy.copy()
@@ -228,8 +221,8 @@ sel_cut_w = cut_w!=0
 cut_spec =[]
 cut_wavelength =[]
 #Mask
-for j in range(0,40):
-    cut_spec.append(one_frame_spec[j,:][sel_cut_w])
+for i in range(0,len_spectrum):
+    cut_spec.append(one_frame_spec[i,:][sel_cut_w])
     cut_wavelength.append(w_for_cut[sel_cut_w])
 
 
@@ -238,11 +231,8 @@ plot_func.plot_spectrum_after_cut(cut_spec, cut_wavelength, len_spectrum)
 """Definition of the MASTER spectrum: """
 
 master_wavelength, master_spec, master_spec_spl = spec_fun.master_spectrum_fit(master_wavelength, master_spec, master_weight)
-plot_func.plot_master_spectrum(master_wavelength, master_spec, master_spec_spl)
+plot_func.plot_master_spectrum(master_wavelength, master_spec, master_spec_spl) #with telluric lines
 
-
-
-data_file1.close()
 """FILES of EPOCHS and TELLURIC LINES"""
 step2_data = [std_flux, group_spec, one_frame_spec, w_shift, w_for_cut, w_telluric, master_wavelength, master_spec, master_spec_spl]
 name_file_step2_data = root2+file2

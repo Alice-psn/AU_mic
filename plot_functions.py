@@ -260,17 +260,41 @@ def make_image_v_r(img_ccf, r_position, velocity, title):
     
     
 def make_image_v_r_epochs(img_ccf, r_position, velocity, V_MAX, V_MIN, title):
-    velocity = np.linspace(np.min(velocity), np.max(velocity), len(velocity)+1)
-    r_position = np.linspace(np.min(r_position), np.max(r_position), len(r_position)+1)
-    r_position_arcsec = r_position*0.0373
+    img_ccf = np.asarray(img_ccf)
+    nr, nv = img_ccf.shape
+    # Build pcolormesh edges from the image shape to guarantee consistent dimensions.
+    velocity_edges = np.linspace(np.min(velocity), np.max(velocity), nv + 1)
+    r_position_edges = np.linspace(np.min(r_position), np.max(r_position), nr + 1)
+    r_position_arcsec = r_position_edges*0.0373
+    finite_vals = img_ccf[np.isfinite(img_ccf)]
+    if finite_vals.size > 0:
+        p1, p99 = np.percentile(finite_vals, [1.0, 99.0])
+        if p99 <= p1:
+            p1, p99 = np.min(finite_vals), np.max(finite_vals)
+    else:
+        p1, p99 = 0.0, 1.0
+
+    # If user-provided limits are too wide compared with the data dynamic range,
+    # switch to robust percentile limits to avoid visually empty plots.
+    if np.isfinite(V_MIN) and np.isfinite(V_MAX) and V_MAX > V_MIN:
+        data_span = max(p99 - p1, 1e-12)
+        user_span = V_MAX - V_MIN
+        if user_span > 10.0 * data_span:
+            vmin_plot, vmax_plot = p1, p99
+        else:
+            vmin_plot, vmax_plot = V_MIN, V_MAX
+    else:
+        vmin_plot, vmax_plot = p1, p99
+
     fig, ax = plt.subplots()
     plt.title(title)
     plt.xlabel('Radial Velocity [km/s]')
     plt.ylabel('Separation [arcsec]')
     
     ax.tick_params(color='blue', axis='x', labelsize=10)
-        
-    bar=ax.pcolormesh(velocity[10:-10], r_position_arcsec, img_ccf[:,10:-10], shading='flat', vmin=V_MIN, vmax=V_MAX)
+
+    bar=ax.pcolormesh(velocity_edges, r_position_arcsec, img_ccf,
+                      shading='flat', vmin=vmin_plot, vmax=vmax_plot)
     fig.colorbar(bar,ax=ax)
     fig.set_figheight(5)
     fig.set_figwidth(10)

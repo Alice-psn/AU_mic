@@ -22,7 +22,7 @@ root = 'C:/Users/alice/Documents/Stage Suède/data/'
 root1 = 'C:/Users/alice/Documents/Stage Suède/data1/'
 root1_1 = 'C:/Users/alice/Documents/Stage Suède/data1_1/'
 
-file_name ="A27"
+file_name ="B11"
 
 """
 Creation of the list of files whcih you want analyse: 
@@ -54,11 +54,10 @@ for i in range(0,3):
 print(files)
 print(files1_1)
 
-j=0
-
 for file in files:
-    file_path = os.path.join(root, files[j])
+    file_path = os.path.join(root, file)
     udata = np.load(file_path)
+    file1 = 'S1_' + file
     file1_path = os.path.join(root1, file1)
     data_file1 = open(file1_path, 'rb')
     psf_spl, spec_spl, spec, err_spec, weight, wavelength = pickle.load(data_file1)
@@ -149,5 +148,4 @@ for file in files:
     with open(name_file_step1_1_data, 'wb') as fp:
         pickle.dump(wdata, fp)
     
-    j+=1
         

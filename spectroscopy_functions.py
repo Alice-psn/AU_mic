@@ -283,6 +283,27 @@ def sigma_clipping(residual, niter=100, klip=3):
         sel = np.absolute(residual) < klip*sigma
     return sel
 
+
+def dw_selection(data, center, delta, type_data='w'):
+    """Select rows inside a symmetric window around `center`.
+
+    Parameters
+    ----------
+    data : structured ndarray
+        Input table with spectroscopy columns.
+    center : float
+        Center value for the selection window.
+    delta : float
+        Half-width of the window.
+    type_data : str, optional
+        Selection axis: 'w' (wavelength) or 'r' (slit offset).
+    """
+    if type_data not in ('w', 'r'):
+        raise ValueError("type_data must be 'w' or 'r'")
+
+    sel = np.abs(data[type_data] - center) < delta
+    return data[sel]
+
 """"
 add_noise is the function which adds NOISE to the original set of data, giving 
 in input the original set of data and the factor of noise (default value = 10)
@@ -478,6 +499,8 @@ def  image_separation_velocity(data, master_wavelength, spec_spl, psf_spl, maste
     """img_ccf_SRF -= np.min(img_ccf_SRF[:,10:-10], axis = 1)[:,None]
     img_ccf_SRF /= np.max(img_ccf_SRF[:,10:-10], axis = 1)[:,None]
     plot_func.make_image_v_r(img_ccf_SRF, r_position, vel_array)"""
+
+    return img_ccf_ERF
 
     
 def spectrum_test(udata, r, dr):
@@ -675,13 +698,13 @@ def master_spectrum_fit(master_wavelength, master_spec, master_weight):
     master_wavelength = (np.array(master_wavelength)).flatten()
     master_spec = (np.array(master_spec)).flatten()
     master_weight = (np.array(master_weight)).flatten()
-    print(master_wavelength)
-    print(len(master_wavelength))
+    #print(master_wavelength)
+    #print(len(master_wavelength))
     ind = np.argsort(master_wavelength)
     master_spec = master_spec[ind]
     master_weight = master_weight[ind]
     master_wavelength = np.sort(master_wavelength)
-    print(master_wavelength)
+    #print(master_wavelength)
     knots = np.arange(master_wavelength[30], master_wavelength[-30], 0.015)
     master_spec_spl = sp.interpolate.LSQUnivariateSpline(master_wavelength, master_spec, knots, master_weight)
     

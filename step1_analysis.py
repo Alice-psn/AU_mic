@@ -37,7 +37,7 @@ root1 = 'C:/Users/alice/Documents/Stage Suède/data1/'
 FLAG TO activate if you are working with files A11, A12,  B11 in order to 
 cut the strange structure which compare insiede the image.
 """
-file_name ="A27"
+file_name ="B11"
 
 #SESSION 1: group of files analysis
 #SESSION 2: single file analysis
@@ -110,19 +110,20 @@ if(SESSION==1):
         res_data = udata.copy() #copy of data
         res_data['f'] = res # replace the flux with the residuals
         img_res = spec_fun.make_image(res_data)#create an image of the residuals
-        #plot_func.plot_image(img_res, res_data, title="Model of Residues")
+        plot_func.plot_image(img_res, res_data, title="Model of Residues")
             
         sel = spec_fun.sigma_clipping(res, niter=N)
         
         """Data after the clipping method:"""
         data = udata[sel]    
         ind = np.argsort(data['r'])
-        rdata = udata[ind] 
+        rdata = data[ind] #modif
         img_res = spec_fun.make_image(data)#image of the model data
         plot_func.plot_image(img_res, data, fmin=np.min(data['f']), fmax=np.max(data['f']), title="Model of Data after the clipping")
         ind_max = np.argmax(psf_spl(data['r']))
         r_star = data['r'][ind_max] #position of the star 
-        print(r_star)
+        print('r_star',r_star)
+
         """Stellar Spectrum:"""
         M = 3
         min_slit = int(np.min(data['r']))

@@ -33,15 +33,15 @@ import plot_functions as plot_func
 #from Master_Thesis_Analysis import step1_analysis as step1
 
 #st = time.time()
-root = '/home/beatricecaccherano/Master_Thesis_Analysis/data/'
-root1 = '/home/beatricecaccherano/Master_Thesis_Analysis/dataS1/'
-root2 = '/home/beatricecaccherano/Master_Thesis_Analysis/dataS2/'
+root = 'C:/Users/alice/Documents/Stage Suède/data/'
+root1 = 'C:/Users/alice/Documents/Stage Suède/data1/'
+root2 = 'C:/Users/alice/Documents/Stage Suède/data2/'
 
 """
 FLAG TO activate if you are working with files A11, A12,  B11 in order to 
 cut the strange structure which compare insiede the image.
 """
-file_name ="B14"
+file_name ="A27"
 
 """
 Creation of the list of files whcih you want analyse: 
@@ -56,7 +56,7 @@ group_num = int(group)
 
 files = [file]
 files1 =[file1]
-for i in range(0,39):
+for i in range(0,3):
     group_num += 1
     if(group_num <10):
         group = group[0] + str(group_num)
@@ -73,19 +73,16 @@ for i in range(0,39):
 print(files)
 print(files1)
 
-
-
-j=0
-
 len_spectrum = len(files1) 
-vel_shift = np.empty(40)
-vel = np.empty(40)
-FWHM = np.empty(40)
-FWHM_for= np.empty(40)
-barycorr = np.zeros(40, dtype=object) 
-group_spec = np.empty([40,3000])
-group_psf =  np.empty([40,3000])
-one_frame_spec = np.empty([40,3000])
+vel_shift = np.empty(len_spectrum)
+vel = np.empty(len_spectrum)
+FWHM = np.empty(len_spectrum)
+FWHM_for= np.empty(len_spectrum)
+barycorr = np.zeros(len_spectrum, dtype=object) 
+group_spec = np.empty([len_spectrum,3000])
+group_psf =  np.empty([len_spectrum,3000])
+one_frame_spec = np.empty([len_spectrum,3000])
+w_shift = np.empty([len_spectrum,3000])
 
 master_wavelength = [] #np.empty([40,3000])
 master_spec = []
@@ -98,19 +95,19 @@ eso = coord.EarthLocation.from_geodetic(lat = 70.416666667*u.deg ,
 
 
 
-for file1 in files1:
-    file_path = os.path.join(root, files[j])
+for j, (file, file1) in enumerate(zip(files, files1)):
+    file_path = os.path.join(root, file)
     udata = np.load(file_path)
     file1_path = os.path.join(root1, file1)
-    data_file1 = open(file1_path, 'rb')
-    psf_spl, spec_spl, spec, err_spec, weight, wavelength = pickle.load(data_file1)
+    with open(file1_path, 'rb') as data_file1:
+        psf_spl, spec_spl, spec, err_spec, weight, wavelength = pickle.load(data_file1)
     
     w_ind = np.argsort(udata['w'])
     wdata = udata[w_ind]
     r_ind = np.argsort(udata['r'])
     rdata = udata[r_ind]
     
-    print("AU Mic code is running with '", files[j], "':" )
+    print("AU Mic code is running with '", file, "':" )
     print("and with '", file1, "':" )
     
     """Studing of the DATA NOISY through the FWHM of the psf"""  
@@ -123,7 +120,6 @@ for file1 in files1:
     w = np.linspace(wdata['w'][2000],wdata['w'][-2000], 3000)
     print("w of file1: ",w)
     r = np.linspace(np.min(udata['r']),np.max(udata['r']), 3000)
-    w_shift = np.empty([40,3000])
     vel_array = np.linspace(-10.0,10.0,2000)
     group_spec[j,:]=spec_spl(w)#array to produce image of all the spectrums
     group_psf[j,:]=psf_spl(r)
@@ -167,10 +163,6 @@ for file1 in files1:
     master_weight.extend(weight)
     
     
-    j+=1
-
-
-
 print(np.asarray(master_spec).shape)
 print(len(master_wavelength))
 
@@ -182,14 +174,14 @@ print(len(master_wavelength))
 """PLOT of all the spectrums of the group"""
 group_spec/=np.median(group_spec, axis = 1)[:,None]#normalization
 plot_func.plot_image_group_spec(group_spec,wdata)
-plot_func.plot_group_spec(group_spec,wdata,len_spectrum)
-plot_func.plot_group_psf(group_psf,udata,len_spectrum)
+plot_func.plot_group_spec(group_spec,w,len_spectrum)
+plot_func.plot_group_psf(group_psf,rdata,len_spectrum)
 
 
 """PLOT of all the spectrums in an UNIQUE REFERENCE FRAME"""
 one_frame_spec/=np.median(one_frame_spec, axis = 1)[:,None]#normalization
 plot_func.plot_image_group_spec(one_frame_spec,wdata)
-plot_func.plot_group_spec(one_frame_spec,wdata,len_spectrum)
+plot_func.plot_group_spec(one_frame_spec,w,len_spectrum)
 
 
 """TELLURIC LINES detection:"""
@@ -205,8 +197,6 @@ limit =0.1# mean_std_flux
 dw = 0.1
 w_no_tell, std_flux, w_telluric = spec_fun.telluric_lines_cut(w_for_cut, std_flux, limit , dw)
 
-    
-data_file1.close()
 #PLOT of the standard deviation after removal:
 plot_func.plot_std_no_tell(w_no_tell, w_telluric ,std_flux, limit)  
     
@@ -225,8 +215,8 @@ sel_cut_w = cut_w!=0
 cut_spec =[]
 cut_wavelength =[]
 #Mask
-for j in range(0,40):
-    cut_spec.append(one_frame_spec[j,:][sel_cut_w])
+for i in range(0,len_spectrum):
+    cut_spec.append(one_frame_spec[i,:][sel_cut_w])
     cut_wavelength.append(w_for_cut[sel_cut_w])
 
 
@@ -237,9 +227,6 @@ plot_func.plot_spectrum_after_cut(cut_spec, cut_wavelength, len_spectrum)
 master_wavelength, master_spec, master_spec_spl = spec_fun.master_spectrum_fit(master_wavelength, master_spec, master_weight)
 plot_func.plot_master_spectrum(master_wavelength, master_spec, master_spec_spl)
 
-
-
-data_file1.close()
 """FILES of EPOCHS and TELLURIC LINES"""
 step2_data = [std_flux, group_spec, one_frame_spec, w_shift, w_for_cut, w_telluric, master_wavelength, master_spec, master_spec_spl]
 name_file_step2_data = root2+file2

@@ -31,17 +31,17 @@ import plot_functions as plot_func
 
 
 st = time.time()
-root = '/home/beatricecaccherano/Master_Thesis_Analysis/data/'
-root1 = '/home/beatricecaccherano/Master_Thesis_Analysis/dataS1/'
-root2 = '/home/beatricecaccherano/Master_Thesis_Analysis/dataS2_old/'
-root3 = '/home/beatricecaccherano/Master_Thesis_Analysis/dataS3_old/'
-root4 = '/home/beatricecaccherano/Master_Thesis_Analysis/dataS4_old/'
+root = 'C:/Users/alice/Documents/Stage Suède/data/'
+root1 = 'C:/Users/alice/Documents/Stage Suède/data1/'
+root2 = 'C:/Users/alice/Documents/Stage Suède/data2/'
+root3 = 'C:/Users/alice/Documents/Stage Suède/data3/'
+root4 = 'C:/Users/alice/Documents/Stage Suède/data4/'
 
 """
 FLAG TO activate if you are working with files A11, A12,  B11 in order to 
 cut the strange structure which compare insiede the image.
 """
-file_name ="A23"
+file_name ="B11"
 
 """
 Useful variable to produce the final image: velocity- separation
@@ -75,7 +75,7 @@ group_num = int(group)
 files = [file]
 files1 =[file1]
 files2 =[file2]
-for i in range(0,39):
+for i in range(0,3):
     group_num += 1
     if(group_num <10):
         group = group[0] + str(group_num)
@@ -93,14 +93,12 @@ print(files)
 print(files1)
 print(files2)
 
-img_ccf_ERF_n1 = np.empty((9, lenr, lenv))
-img_ccf_ERF_n2 = np.empty((11, lenr, lenv))
-img_ccf_ERF_n3 = np.empty((10, lenr, lenv))
-img_ccf_ERF_n4 = np.empty((10, lenr, lenv))
-n1=0
-n2=0
-n3=0
-n4=0
+total_epochs = len(files1)
+
+img_ccf_ERF_n1 = []
+img_ccf_ERF_n2 = []
+img_ccf_ERF_n3 = []
+img_ccf_ERF_n4 = []
 j=0
 
 for file1 in files1:
@@ -140,21 +138,28 @@ for file1 in files1:
     img_ccf_ERF  = spec_fun.image_separation_velocity(res_data, master_wavelength, spec_spl, psf_spl, master_spec_spl, w_telluric, delta_w, j)
     
     
-    if(j==1 or j==2 or j==3 or j==4 or j==5 or j==6 or j==7 or j==8 or j==9):#grade A
-        img_ccf_ERF_n1[n1] =  img_ccf_ERF
-        n1+=1
-    if(j==10 or j==11 or j==12 or j==13 or j==14 or j==15 or j==16 or j==17 or
-       j==18 or j==19 or j==27): #grade A
-        img_ccf_ERF_n2[n2] = img_ccf_ERF
-        n2+=1
-    if(j==0 or j==20 or j==21 or j==22 or j==23 or j==24 or j==25 or j==26 or 
-       j==28 or j==29): #grade C
-        img_ccf_ERF_n3[n3] = img_ccf_ERF
-        n3+=1
-    if(j==30 or j==31 or j==32 or j==33 or j==34 or j==35 or j==36 or j==37 or
-       j==38 or j==39): #grade B
-        img_ccf_ERF_n4[n4] = img_ccf_ERF
-        n4+=1
+    if total_epochs <= 4:
+        # For short runs, map epochs sequentially to nights 1..4.
+        if j == 0:
+            img_ccf_ERF_n1.append(img_ccf_ERF)
+        elif j == 1:
+            img_ccf_ERF_n2.append(img_ccf_ERF)
+        elif j == 2:
+            img_ccf_ERF_n3.append(img_ccf_ERF)
+        elif j == 3:
+            img_ccf_ERF_n4.append(img_ccf_ERF)
+    else:
+        if(j==1 or j==2 or j==3 or j==4 or j==5 or j==6 or j==7 or j==8 or j==9):#grade A
+            img_ccf_ERF_n1.append(img_ccf_ERF)
+        if(j==10 or j==11 or j==12 or j==13 or j==14 or j==15 or j==16 or j==17 or
+           j==18 or j==19 or j==27): #grade A
+            img_ccf_ERF_n2.append(img_ccf_ERF)
+        if(j==0 or j==20 or j==21 or j==22 or j==23 or j==24 or j==25 or j==26 or 
+           j==28 or j==29): #grade C
+            img_ccf_ERF_n3.append(img_ccf_ERF)
+        if(j==30 or j==31 or j==32 or j==33 or j==34 or j==35 or j==36 or j==37 or
+           j==38 or j==39): #grade B
+            img_ccf_ERF_n4.append(img_ccf_ERF)
         
         
     """FILES of Spectrum and PSF of the star """
@@ -166,7 +171,11 @@ for file1 in files1:
     j+=1
     
 
-step4_data =  [ img_ccf_ERF_n1, img_ccf_ERF_n2, img_ccf_ERF_n3, img_ccf_ERF_n4 ]   
+img_ccf_ERF_n1 = np.asarray(img_ccf_ERF_n1)
+img_ccf_ERF_n2 = np.asarray(img_ccf_ERF_n2)
+img_ccf_ERF_n3 = np.asarray(img_ccf_ERF_n3)
+img_ccf_ERF_n4 = np.asarray(img_ccf_ERF_n4)
+step4_data =  [ img_ccf_ERF_n1, img_ccf_ERF_n2, img_ccf_ERF_n3, img_ccf_ERF_n4 ]
 name_file_step4_data = root4+'S4_'+file_name+ '.npy'     
 print(name_file_step4_data)
 with open(name_file_step4_data, 'wb') as fp:

@@ -22,17 +22,17 @@ import plot_functions as plot_func
 
 st = time.time()
 
-#SESSION = 1 #old analysis
-SESSION = 2 #new analysis
+SESSION = 1 #old analysis
+#SESSION = 2 #new analysis
 
 
 if(SESSION==1):
 
-    root = '/home/beatricecaccherano/Master_Thesis_Analysis/data/'
-    root1 = '/home/beatricecaccherano/Master_Thesis_Analysis/dataS1/'
-    root2 = '/home/beatricecaccherano/Master_Thesis_Analysis/dataS2_old/'
-    root3 = '/home/beatricecaccherano/Master_Thesis_Analysis/dataS3_old/'
-    root4 = '/home/beatricecaccherano/Master_Thesis_Analysis/dataS4_old/'
+    root = 'C:/Users/alice/Documents/Stage Suède/data/'
+    root1 = 'C:/Users/alice/Documents/Stage Suède/data1/'
+    root2 = 'C:/Users/alice/Documents/Stage Suède/data2/'
+    root3 = 'C:/Users/alice/Documents/Stage Suède/data3/'
+    root4 = 'C:/Users/alice/Documents/Stage Suède/data4/'
     
 if(SESSION==2):
     root = '/home/beatricecaccherano/Master_Thesis_Analysis/data/'
@@ -44,7 +44,7 @@ if(SESSION==2):
 
 #ngroups = ["11", "12", "13", "14", "15", "21", "22", "23", "25", "31", "32", "33", "34", "35"]
 #ngroups = ["11", "12", "13", "23", "25", "31", "35"]
-ngroups = ["11", "12", "13", "25", "31"]
+ngroups = ["27"]
 
 d_star = 9.79 #pc -- Distance of AU Mic star
 M_star = 0.4*const.M_sun #AU Mic Mass
