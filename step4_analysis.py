@@ -21,7 +21,7 @@ st = time.time()
 SESSION = 1 #old analysis
 #SESSION = 2 #new analysis
 
-ngroup = "11"
+ngroup = "12"
 
 if(SESSION==1):
 

@@ -41,7 +41,7 @@ root2 = 'C:/Users/alice/Documents/Stage Suède/data2/'
 FLAG TO activate if you are working with files A11, A12,  B11 in order to 
 cut the strange structure which compare insiede the image.
 """
-file_name ="B11"
+file_name ="B12"
 
 """
 Creation of the list of files whcih you want analyse: 
@@ -162,7 +162,7 @@ for j, (file, file1) in enumerate(zip(files, files1)):
         one_frame_spec[j,:]=spec_spl(w_shift[j,:])#array to produce the image of all the spectrum in an unique frame
     
     #print('len(spec)',len(spec))
-    master_spec.extend(spec/np.median(spec))
+    master_spec.extend(spec/np.median(spec)) #ca bouuge pas ??
     master_wavelength.extend(wavelength)    
     master_weight.extend(weight)
     

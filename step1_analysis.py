@@ -37,7 +37,7 @@ root1 = 'C:/Users/alice/Documents/Stage Suède/data1/'
 FLAG TO activate if you are working with files A11, A12,  B11 in order to 
 cut the strange structure which compare insiede the image.
 """
-file_name ="B11"
+file_name ="B12"
 
 #SESSION 1: group of files analysis
 #SESSION 2: single file analysis

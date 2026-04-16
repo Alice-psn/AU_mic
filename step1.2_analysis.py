@@ -39,7 +39,7 @@ root1 = 'C:/Users/alice/Documents/Stage Suède/data1/'
 FLAG TO activate if you are working with files A11, A12, B11 in order to 
 cut the strange structure which compare insiede the image.
 """
-file_name ="B11"
+file_name ="B12"
 
 #SESSION 1: group of files analysis
 #SESSION 2: single file analysis
@@ -80,7 +80,7 @@ if(SESSION==1):
         udata = np.load(file_path, allow_pickle=True)#data with corrected r and sorted by w
         file1_path = os.path.join(root1, file1)
         with open(file1_path, 'rb') as data_file1:
-            psf_spl, spec_spl0, spec, err_spec, weight, wavelength = pickle.load(data_file1)
+            psf_spl, spec_spl0, spec, err_spec, weight, wavelength = pickle.load(data_file1) #recup spectrum step1
         
         print("AU Mic code is running with '", file, "':" )
         img = spec_fun.make_image(udata)
@@ -99,7 +99,7 @@ if(SESSION==1):
         plot_func.plot_psf(udata, psf, psf_spl, spec_spl0, title)
         #print(len(udata['r']))
                       
-        ind = np.argsort(udata['r'])
+        ind = np.argsort(udata['r']) #udata was sorted by w before
         rdata = udata[ind] 
         ind_max = np.argmax(psf_spl(udata['r']))
         r_star = udata['r'][ind_max] #position of the star 

@@ -22,7 +22,7 @@ root = 'C:/Users/alice/Documents/Stage Suède/data/'
 root1 = 'C:/Users/alice/Documents/Stage Suède/data1/'
 root1_1 = 'C:/Users/alice/Documents/Stage Suède/data1_1/'
 
-file_name ="B11"
+file_name ="B12"
 
 """
 Creation of the list of files whcih you want analyse: 
