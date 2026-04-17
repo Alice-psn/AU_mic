@@ -96,7 +96,7 @@ if(SESSION==1):
                       
         
         """SIGMA CLIPPING METHOD:"""
-        N = 0
+        N = 2
                         
         """Model of Data:"""
         model_data = udata.copy()#copy of data
