@@ -29,7 +29,7 @@ class FileManager:
         for file in self.files:
             file_path = os.path.join(self.root, file)
             values = np.load(file_path)
-            data_object = Data(values, source_path=file_path, file_id=file, epoch_index=int(file[6:8]), region=self.region)
+            data_object = Data(values, source_path=file_path, file_id=file, epoch_index=int(file[5:8]), region=self.region)
             dataset.items.append(data_object)
         return dataset
 

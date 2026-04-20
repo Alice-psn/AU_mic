@@ -42,7 +42,7 @@ vmax = 75.0
 
 spec_resolution = 0.015
 
-print("Spectrum Resolution: ",spec_resolution)
+#print("Spectrum Resolution: ",spec_resolution)
 
 """AUMic coordinates:"""
 aumic = coord.SkyCoord("20:45:09.5324974119", "-31:20:27.237889841", 
@@ -276,7 +276,7 @@ residuals which are the difference between the outlier (or noise) data and
 the original data. It returns the index of the values which exceed the criteria
 of the method (default = 10sigma)
 """
-def sigma_clipping(residual, niter=100, klip=3):
+def sigma_clipping(residual, niter=100, klip=10):
     sel = np.ones(len(residual), dtype='?')
     for n in range(niter):
         sigma = np.std(residual[sel])
