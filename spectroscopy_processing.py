@@ -96,6 +96,8 @@ class SpectroscopyProcessing:
         return data.derived.get('clean_values', data.raw_values)  # Use clean values if available, otherwise fall back to raw values
 
     def rough_spectrum(self, data: Data):
+        """Compute the rough stellar spectrum (RSS) by summing flux values along x-axis for each y position, 
+        and then interpolate it as a function of wavelength."""
         values = self._working_values(data)
         x_min = data.stats['xmin']
         x_max = data.stats['xmax']
@@ -124,6 +126,7 @@ class SpectroscopyProcessing:
         return interp_spectrum, err_interp_spectrum, wavelength, spectrum, err_spectrum
 
     def rss(self, dataset: Dataset, niter: int = 2, clip: float = 100):
+        """Compute the rough stellar spectrum (RSS) for each data item in the dataset, and store it in the derived quantities."""
         for data in dataset.items:
             self.clean_outliers(data, niter=niter, clip=clip)
             interp_spectrum, err_interp_spectrum, wavelength, spectrum, err_spectrum = self.rough_spectrum(data)
@@ -135,6 +138,7 @@ class SpectroscopyProcessing:
         return dataset
     
     def fit_psf_rough(self, data: Data, spec_fun=None):
+        """Fit a rough PSF by dividing the flux values by the interpolated spectrum, and then fit a spline"""
         values = self._working_values(data)
         if spec_fun is None:
             spec_fun = data.derived.get('rss_interp')
@@ -148,9 +152,6 @@ class SpectroscopyProcessing:
         valid = np.isfinite(denom) & (denom != 0.0) & np.isfinite(rdata['f']) & np.isfinite(rdata['e'])
         rdata = rdata[valid]
         denom = denom[valid]
-
-        if len(rdata) < 16:
-            raise ValueError("Not enough valid points to fit rough PSF.")
 
         psf = rdata['f'] / denom
         err_psf = rdata['e'] / denom
@@ -177,50 +178,45 @@ class SpectroscopyProcessing:
         return dataset
     
     def compute_model_data(self, data: Data, rss_interp=None, psf_spl=None):
-        values = self._working_values(data)
+        values = data.raw_values
         if rss_interp is None:
             rss_interp = data.derived.get('rss_interp')
         if psf_spl is None:
             psf_spl = data.derived.get('psf_rough_spl')
-        if rss_interp is None or psf_spl is None:
-            raise ValueError("rss_interp and psf_spl are required to compute model data.")
 
         model_data = data.copy()
         model_data.raw_values['f'] = rss_interp(values['w']) * psf_spl(values['r'])
         return model_data
     
     def compute_residuals(self, data: Data, rss_interp=None, psf_spl=None):
-        values = self._working_values(data)
+        values = data.raw_values
         if rss_interp is None:
             rss_interp = data.derived.get('rss_interp')
         if psf_spl is None:
             psf_spl = data.derived.get('psf_rough_spl')
-        if rss_interp is None or psf_spl is None:
-            raise ValueError("rss_interp and psf_spl are required to compute residuals.")  # do not know how useful those warnings are
 
         res = (values['f'] - rss_interp(values['w']) * psf_spl(values['r'])) / values['e']
         res_data = data.copy()
         res_data.raw_values['f'] = res
         return res_data
     
-    def sigma_clipping_mask(self, residual, niter=100, klip=10):
+    @staticmethod
+    def sigma_clipping_mask(residual: np.ndarray, niter:int=100, klip:float=10):
         sel = np.ones(len(residual), dtype='?')
         for _ in range(niter):
             sigma = np.std(residual[sel])
             sel = np.abs(residual) < klip * sigma
         return sel
 
-    def compute_sigma_clipping_mask(self, data: Data, rss_interp=None, psf_spl=None, niter=100, klip=10):
+    def compute_sigma_clipping_mask(self, data: Data, rss_interp=None, psf_spl=None, niter:int=100, klip:float=10):
         res_data = self.compute_residuals(data, rss_interp, psf_spl)
         sel = self.sigma_clipping_mask(res_data.raw_values['f'], niter, klip)
         return sel
 
-    def sigma_clipping(self, data: Data, niter=100, klip=10):
-        values = self._working_values(data)
+    def sigma_clipping(self, data: Data, niter:int=100, klip:float=10):
+        values = data.raw_values
         rss_interp = data.derived.get('rss_interp')
         psf_spl = data.derived.get('psf_rough_spl')
-        if rss_interp is None or psf_spl is None:
-            raise ValueError("Run rss() and psf_rough() before sigma_clipping().")
 
         model_data = self.compute_model_data(data, rss_interp, psf_spl)
         res_data = self.compute_residuals(data, rss_interp, psf_spl)
@@ -236,22 +232,19 @@ class SpectroscopyProcessing:
         data.masks['sigma_clip'] = sel
         return data
 
-    def sigma_clipping_dataset(self, dataset: Dataset, niter=2, klip=10):
+    def sigma_clipping_dataset(self, dataset: Dataset, niter:int=2, klip:float=10):
         for data in dataset.items:
             self.sigma_clipping(data, niter=niter, klip=klip)
         return dataset
 
 
-    def fit_psf_from_values(self, values, spec_fun):
+    def fit_psf_from_values(self, values: dict, spec_fun):
         ind = np.argsort(values['r'])
         data_sorted = values[ind]
 
         denom = spec_fun(data_sorted['w'])
         valid = np.isfinite(denom) & (denom != 0.0) & np.isfinite(data_sorted['f']) & np.isfinite(data_sorted['e'])
         data_sorted = data_sorted[valid]
-
-        if len(data_sorted) < 16:
-            raise ValueError("Not enough valid points to fit PSF.")
 
         psf = data_sorted['f'] / spec_fun(data_sorted['w'])
         err_psf = data_sorted['e'] / spec_fun(data_sorted['w'])
@@ -269,21 +262,15 @@ class SpectroscopyProcessing:
         psf_spl = sp.interpolate.LSQUnivariateSpline(data_sorted['r'], psf, knots, weight)
         return psf_spl, psf, err_psf
 
-    def fit_spec(self, values, psf_fun, r_star, dr=5.0, spec_resolution=0.015):
+    def fit_spec(self, values: dict, psf_fun, r_star: float, dr: float=5.0, spec_resolution: float=0.015):
         ind = np.argsort(values['w'])
         wdata = values[ind]
         ind_dr = np.abs(wdata['r'] - r_star) < dr
         data = wdata[ind_dr]
 
-        if len(data) < 16:
-            raise ValueError("Not enough valid points to fit spectrum.")
-
         denom = psf_fun(data['r'])
         valid = np.isfinite(denom) & (denom != 0.0) & np.isfinite(data['f']) & np.isfinite(data['e'])
         data = data[valid]
-
-        if len(data) < 16:
-            raise ValueError("Not enough valid points to fit spectrum after filtering.")
 
         spec = data['f'] / psf_fun(data['r'])
         err_spec = data['e'] / psf_fun(data['r'])
@@ -303,10 +290,8 @@ class SpectroscopyProcessing:
         for data in dataset.items:
             clipped_values = data.derived.get('clipped_values')
             psf_rough_spl = data.derived.get('psf_rough_spl')
-            if clipped_values is None or psf_rough_spl is None:
-                raise ValueError("Run sigma_clipping_dataset() and psf_rough() before refine_spectrum_psf().")
 
-            # As in old step1: determine r_star after sigma-clipped selection.
+            # Determine r_star after sigma-clipped selection.
             ind_max = np.argmax(psf_rough_spl(clipped_values['r']))
             r_star = clipped_values['r'][ind_max]
             data.derived['r_star'] = float(r_star)
@@ -326,6 +311,69 @@ class SpectroscopyProcessing:
             data.derived['psf_spl'] = psf_spl
             data.derived['psf'] = np.asarray(psf)
             data.derived['err_psf'] = np.asarray(err_psf)
-
         return dataset
 
+    def minimize_dr(self, dataset: Dataset):
+        """Estimate dr(w) and apply r-correction for each file."""
+        for item in dataset.items:
+            psf_spl = item.derived.get('psf_spl')
+            spec_spl = item.derived.get('spec_spl')
+            if psf_spl is None or spec_spl is None:
+                continue
+
+            # Flux normalization
+            ind = np.argsort(item.raw_values['w'])
+            wdata = item.raw_values[ind].copy()
+            wdata['f'] = wdata['f'] / spec_spl(wdata['w'])
+
+            # Definition of wavelength range
+            num_delta_w = 2 * int(np.max(wdata['w']) - np.min(wdata['w'])) + 1
+            w0_array = np.zeros(num_delta_w)
+            dr_array = np.zeros(num_delta_w)
+            chi2_array = np.zeros(num_delta_w)
+            w0 = float(np.min(wdata['w']) + 0.25)
+            dw = 0.5
+
+            # Selection of inner region of PSF.
+            ind_max = np.argmax(psf_spl(wdata['r']))
+            r0 = wdata['r'][ind_max]
+            r_data = wdata[np.abs(wdata['r'] - r0) < 15.0]
+
+            for i in range(num_delta_w):
+                sel_data = r_data[np.abs(r_data['w'] - w0) < dw]
+                best_dr = 0.0
+                best_chi2 = np.nan
+
+                if len(sel_data) > 0:
+                    r = sel_data['r']
+                    flux = sel_data['f']
+                    err_flux = sel_data['e']
+                    chi2 = lambda dr: np.sum((flux-psf_spl(r-dr))**2.0/err_flux)
+                    res = sp.optimize.minimize_scalar(chi2, bounds=(-2.0, 2.0), method='bounded')
+                    best_dr = float(res.x)
+                    best_chi2 = float(res.fun)
+
+                w0_array[i] = w0
+                dr_array[i] = best_dr
+                chi2_array[i] = best_chi2
+                w0 += 0.5
+
+            knots = np.linspace(w0_array[3], w0_array[-3], 7)
+            dr_spl = sp.interpolate.LSQUnivariateSpline(w0_array, dr_array, knots)
+
+            corrected_values = item.raw_values.copy()
+            corrected_values['r'] = corrected_values['r'] - dr_spl(corrected_values['w'])
+
+            interp_data = r_data.copy()
+            interp_data['r'] = interp_data['r'] - dr_spl(interp_data['w'])
+
+            item.derived['dr_w0'] = w0_array
+            item.derived['dr_values'] = dr_array
+            item.derived['dr_chi2'] = chi2_array
+            item.derived['dr_knots'] = np.asarray(knots)
+            item.derived['dr_spl'] = dr_spl
+            item.derived['dr_wdata'] = wdata
+            item.derived['dr_norm_data'] = r_data
+            item.derived['interp_dr_data'] = interp_data
+            item.derived['r_corrected_values'] = corrected_values
+        return dataset

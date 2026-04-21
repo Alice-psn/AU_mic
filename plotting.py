@@ -8,6 +8,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from pathlib import Path
 import re
+import scipy as sp
 
 from spectroscopy_processing import SpectroscopyProcessing
 
@@ -42,13 +43,14 @@ class Plotter:
             fmin = np.nanmin(image)
         if fmax is None:
             fmax = np.nanmax(image)
-        xmin, xmax = np.min(data.raw_values['x']), np.max(data.raw_values['x'])
-        ymin, ymax = np.min(data.raw_values['y']), np.max(data.raw_values['y'])
+        xmin, xmax = data.stats['xmin'], data.stats['xmax']
+        ymin, ymax = data.stats['ymin'], data.stats['ymax']
         fig, ax = plt.subplots()
         plt.title(title)
         plt.xlabel('x')
         plt.ylabel('y')
         mappable = ax.imshow(image, origin='lower', aspect='auto', extent=[xmin, xmax, ymin, ymax], vmin=fmin, vmax=fmax)
+        #mappable = plt.pcolormesh(image)
         if show_colorbar:
             fig.colorbar(mappable, ax=ax)
         ax.tick_params(color='blue', axis='x', labelsize=10)
@@ -58,14 +60,14 @@ class Plotter:
 
 
     def plot_initial_data(self, dataset:Dataset):
-        """ Plot the initial flux data for each file in the dataset. No calculations
+        """ Plot the initial flux data for each file in the dataset
         """
         for data in dataset.items:
             img = SpectroscopyProcessing.make_image(data)
             file_path = data.file_id
             self.plot_image(img, data, fmin=data.stats['fmin'], fmax=data.stats['fmax'], title=f"Flux data {file_path} as function of pixels ", show_colorbar=False)
 
-    def plot_rss(self, wavelength, spectrum, title="Rough Stellar Spectrum - RSS", region: str | None = None):
+    def plot_rss(self, wavelength: np.ndarray, spectrum: np.ndarray, title="Rough Stellar Spectrum - RSS", region: str = None):
         if self.output_mode == 'off':
             return
         fig, ax = plt.subplots()
@@ -89,7 +91,7 @@ class Plotter:
                 region=data.region,
             )
 
-    def plot_spectrum(self, data: Data, spec, spec_spl, title=None):
+    def plot_spectrum(self, data: Data, spec_spl, title=None):
         if self.output_mode == 'off':
             return
         values = data.derived.get('clipped_values', data.derived.get('clean_values', data.raw_values))
@@ -113,13 +115,12 @@ class Plotter:
         if self.output_mode == 'off':
             return
         for data in dataset.items:
-            spec = data.derived.get('spec')
             spec_spl = data.derived.get('spec_spl')
-            if spec is None or spec_spl is None:
+            if spec_spl is None:
                 continue
-            self.plot_spectrum(data, spec, spec_spl, title=f"Final Spectrum - {data.file_id}")
+            self.plot_spectrum(data, spec_spl, title=f"Final Spectrum - {data.file_id}")
     
-    def plot_psf(self, data, psf, psf_spl, spec_spl0, title=None):
+    def plot_psf(self, data: Data, psf: np.ndarray, psf_spl: sp.interpolate.LSQUnivariateSpline, spec_spl0: sp.interpolate.LSQUnivariateSpline, title=None):
         if self.output_mode == 'off':
             return
         values = data.derived.get('clean_values', data.raw_values)
@@ -207,4 +208,39 @@ class Plotter:
         for data in dataset.items:
             self.plot_clipped_data(data, title=f"Clipped Data - {data.file_id}")
 
+    def plot_interp_dr(self, dr_spl, w0_array, dr_array, wdata, knots, title='dr correction for each interval dw', region: str = None):
+        if self.output_mode == 'off':
+            return
+        if dr_spl is None or w0_array is None or dr_array is None or wdata is None:
+            return
 
+        fig, ax = plt.subplots()
+        plt.title(title)
+        plt.xlabel('Wavelength [nm]')
+        plt.ylabel('dr [pixel unit]')
+        ax.plot(w0_array, dr_array, '.', color='green', ms=3, label='Best dr per dw')
+        ax.plot(wdata['w'], dr_spl(wdata['w']), '-', color='red', ms=1, label='dr spline')
+
+        if knots is not None and len(knots) > 0:
+            ax.plot(knots, dr_spl(knots), 'x', color='black', ms=5, label='Knots')
+
+        ax.tick_params(color='blue', axis='x', labelsize=10)
+        ax.legend(loc='best')
+        fig.set_figheight(5)
+        fig.set_figwidth(10)
+        self._emit_figure(fig, category='interp_dr', filename=title, region=region)
+
+    def plot_interp_dr_dataset(self, dataset: Dataset, title=None):
+        if self.output_mode == 'off':
+            return
+        for data in dataset.items:
+            dr_spl = data.derived.get('dr_spl')
+            w0_array = data.derived.get('dr_w0')
+            dr_array = data.derived.get('dr_values')
+            wdata = data.derived.get('dr_wdata')
+            knots = data.derived.get('dr_knots')
+            if dr_spl is None or w0_array is None or dr_array is None or wdata is None:
+                continue
+
+            plot_title = f"dr correction for each interval dw - {data.file_id}" if title is None else title
+            self.plot_interp_dr(dr_spl, w0_array, dr_array, wdata, knots, title=plot_title, region=data.region)
