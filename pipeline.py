@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""High-level orchestration layer for steps 1 to 5.
+"""Orchestration layer for steps 1 to 5.
 This module defines the main pipeline class and the main function to run the analysis.
 """
 from file_manager import FileManager
 from plotting import Plotter
 from spectroscopy_processing import SpectroscopyProcessing
+from data_model import Data, Dataset
 
 def run_step1(dataset, spec_process, plotter):
     plotter.plot_initial_data(dataset)
@@ -28,6 +29,18 @@ def run_step1(dataset, spec_process, plotter):
     plotter.plot_interp_dr_dataset(dataset)
 
 
+
+def run_step1_2(dataset, spec_process, plotter):
+    plotter.plot_initial_data(dataset)
+
+    spec_process.psf_rough(dataset)
+    plotter.plot_psf_dataset(dataset, 'rough')
+
+    spec_process.refine_spectrum_psf(dataset, m_iter=3, dr=5.0)
+    plotter.plot_spectrum_dataset(dataset)
+    plotter.plot_psf_dataset(dataset, 'final')
+
+
 def main(): #plot all spectra related to a region
     root = 'C:/Users/alice/Documents/Stage Suède/data/'
     plot_root = 'C:/Users/alice/Documents/Stage Suède/plots/'
@@ -38,6 +51,9 @@ def main(): #plot all spectra related to a region
 
     dataset = file_manager.load_data()
     run_step1(dataset, spec_process, plotter)
+
+    dataset_step1_2 = dataset.build_step1_2_dataset()
+    run_step1_2(dataset_step1_2, spec_process, plotter)
 
 if __name__ == "__main__":
     main()

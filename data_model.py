@@ -85,6 +85,20 @@ class Dataset:
         self.nb_files = nb_files
         self.products = products
 
+    def build_step1_2_dataset(self):
+        step1_2_items = []
+        for src in self.items:
+            corrected = src.derived.get('r_corrected_values')
+            if corrected is None:
+                continue
+            new_data = Data(raw_values=corrected.copy(), source_path=src.source_path, file_id=src.file_id.replace('.npy', '_S1_2.npy'), epoch_index=src.epoch_index, region=src.region, masks={}, derived={})
 
-class AnalysisResult:
-    pass
+            # Reuse the final step1 spectrum as the rough-spectrum reference for PSF.
+            if src.derived.get('spec_spl') is not None:
+                new_data.derived['rss_interp'] = src.derived['spec_spl']
+
+            new_data.derived['clipped_values'] = new_data.raw_values
+            new_data.derived['parent_file_id'] = src.file_id
+            step1_2_items.append(new_data)
+
+        return Dataset(items=step1_2_items, region=self.region, nb_files=len(step1_2_items), products={})
