@@ -35,7 +35,7 @@ class Plotter:
             plt.show()
         plt.close(fig)
 
-    def plot_image(self, image, data:Data, fmin=None, fmax=None, title="Flux data as function of pixels", show_colorbar: bool = False, category: str = 'initial_data'):
+    def plot_image(self, image, data:Data, fmin=None, fmax=None, title="Flux data as function of pixels", show_colorbar: bool = True, category: str = 'initial_data'):
         """ Plot the image of the flux data as function of pixels"""
         if self.output_mode == 'off':
             return
@@ -49,10 +49,11 @@ class Plotter:
         plt.title(title)
         plt.xlabel('x')
         plt.ylabel('y')
-        mappable = ax.imshow(image, origin='lower', aspect='auto', extent=[xmin, xmax, ymin, ymax], vmin=fmin, vmax=fmax)
-        #mappable = plt.pcolormesh(image)
+        x_data = np.linspace(xmin, xmax, image.shape[1])
+        y_data = np.linspace(ymin, ymax, image.shape[0])
+        bar = plt.pcolormesh(x_data, y_data, image, vmin=fmin, vmax=fmax, shading='auto')
         if show_colorbar:
-            fig.colorbar(mappable, ax=ax)
+            fig.colorbar(bar, ax=ax)
         ax.tick_params(color='blue', axis='x', labelsize=10)
         fig.set_figheight(5)
         fig.set_figwidth(10)
@@ -65,7 +66,12 @@ class Plotter:
         for data in dataset.items:
             img = SpectroscopyProcessing.make_image(data)
             file_path = data.file_id
-            self.plot_image(img, data, fmin=data.stats['fmin'], fmax=data.stats['fmax'], title=f"Flux data {file_path} as function of pixels ", show_colorbar=False)
+            self.plot_image(img, data, fmin=data.stats['fmin'], fmax=data.stats['fmax'],
+                            title=f"Flux data {file_path} as function of pixels ", show_colorbar=True)
+
+    """
+    ************ Spectra *************
+    """
 
     def plot_rss(self, wavelength: np.ndarray, spectrum: np.ndarray, title="Rough Stellar Spectrum - RSS", region: str = None):
         if self.output_mode == 'off':
@@ -120,6 +126,10 @@ class Plotter:
                 continue
             self.plot_spectrum(data, spec_spl, title=f"Final Spectrum - {data.file_id}")
     
+    """
+    ************ PSF *************
+    """
+
     def plot_psf(self, data: Data, psf: np.ndarray, psf_spl: sp.interpolate.LSQUnivariateSpline, spec_spl0: sp.interpolate.LSQUnivariateSpline, title=None):
         if self.output_mode == 'off':
             return
@@ -158,27 +168,29 @@ class Plotter:
                 continue
             self.plot_psf(data, psf, psf_spl, spec_spl0, title=f"{title_prefix} - {data.file_id}")
 
+    """
+    ************ Residuals *************
+    """
+
     def plot_residuals(self, data: Data, title=None):
         if self.output_mode == 'off':
             return
-        image = data.derived.get('residual_image')
-        residual_data = data.derived.get('residual_data')
+        image = data.derived.get('residual_image_raw', data.derived.get('residual_image'))
+        residual_data = data.derived.get('residual_data_raw', data.derived.get('residual_data'))
         if image is None or residual_data is None:
             return
         plot_title = 'Residuals' if title is None else title
-        self.plot_image(
-            image,
-            residual_data,
-            title=plot_title,
-            show_colorbar=True,
-            category='residuals',
-        )
+        self.plot_image(image,residual_data,fmin=-10.0,fmax=10.0,title=plot_title,show_colorbar=True,category='residuals',)
 
-    def plot_residuals_dataset(self, dataset: Dataset):
+    def plot_residuals_dataset(self, dataset: Dataset, title_prefix: str = 'Residuals'):
         if self.output_mode == 'off':
             return
         for data in dataset.items:
-            self.plot_residuals(data, title=f"Residuals - {data.file_id}")
+            self.plot_residuals(data, title=f"{title_prefix} - {data.file_id}")
+
+    """
+    ************ Clipped data *************
+    """
 
     def plot_clipped_data(self, data: Data, title=None):
         if self.output_mode == 'off':
@@ -207,6 +219,10 @@ class Plotter:
             return
         for data in dataset.items:
             self.plot_clipped_data(data, title=f"Clipped Data - {data.file_id}")
+
+    """
+    ************ r correction *************
+    """
 
     def plot_interp_dr(self, dr_spl, w0_array, dr_array, wdata, knots, title='dr correction for each interval dw', region: str = None):
         if self.output_mode == 'off':
@@ -244,3 +260,181 @@ class Plotter:
 
             plot_title = f"dr correction for each interval dw - {data.file_id}" if title is None else title
             self.plot_interp_dr(dr_spl, w0_array, dr_array, wdata, knots, title=plot_title, region=data.region)
+
+    """
+    ************ CCF *************
+    """
+
+    def plot_group_spectra(self, dataset: Dataset):
+        if self.output_mode == 'off':
+            return
+
+        w = dataset.products.get('step2_w_grid')
+        r = dataset.products.get('step2_r_grid')
+        group_spec = dataset.products.get('group_spec')
+        group_psf = dataset.products.get('group_psf')
+        one_frame_spec = dataset.products.get('one_frame_spec')
+        if w is None or group_spec is None or one_frame_spec is None:
+            return
+
+        eps = 1e-12
+        group_spec_norm = group_spec / (np.nanmedian(group_spec, axis=1, keepdims=True) + eps)
+        one_frame_norm = one_frame_spec / (np.nanmedian(one_frame_spec, axis=1, keepdims=True) + eps)
+        group = np.arange(group_spec_norm.shape[0])
+
+        fig, ax = plt.subplots()
+        ax.set_title('Step 2 - Group spectra image')
+        ax.set_xlabel('Wavelength [nm]')
+        ax.set_ylabel('Frame index')
+        bar = ax.pcolormesh(w, group, group_spec_norm, shading='auto')
+        fig.colorbar(bar, ax=ax)
+        fig.set_figheight(5)
+        fig.set_figwidth(10)
+        self._emit_figure(fig, category='group_spectra', filename='group_spectra_image', region=dataset.region)
+
+        fig, ax = plt.subplots()
+        ax.set_title('Step 2 - Group spectra')
+        ax.set_xlabel('Wavelength [nm]')
+        ax.set_ylabel('Normalized flux')
+        for i in range(group_spec_norm.shape[0]):
+            ax.plot(w, group_spec_norm[i], lw=0.8, alpha=0.7)
+        fig.set_figheight(5)
+        fig.set_figwidth(10)
+        self._emit_figure(fig, category='group_spectra', filename='group_spectra_lines', region=dataset.region)
+
+        fig, ax = plt.subplots()
+        ax.set_title('Step 2 - One reference frame image')
+        ax.set_xlabel('Wavelength [nm]')
+        ax.set_ylabel('Frame index')
+        bar = ax.pcolormesh(w, group, one_frame_norm, shading='auto')
+        fig.colorbar(bar, ax=ax)
+        fig.set_figheight(5)
+        fig.set_figwidth(10)
+        self._emit_figure(fig, category='group_spectra', filename='one_frame_spectra_image', region=dataset.region)
+
+        fig, ax = plt.subplots()
+        ax.set_title('Step 2 - One reference frame spectra')
+        ax.set_xlabel('Wavelength [nm]')
+        ax.set_ylabel('Normalized flux')
+        for i in range(one_frame_norm.shape[0]):
+            ax.plot(w, one_frame_norm[i], lw=0.8, alpha=0.7)
+        fig.set_figheight(5)
+        fig.set_figwidth(10)
+        self._emit_figure(fig, category='group_spectra', filename='one_frame_spectra_lines', region=dataset.region)
+
+        if group_psf is not None and r is not None:
+            fig, ax = plt.subplots()
+            ax.set_title('Step 2 - Group PSF')
+            ax.set_xlabel('r - distance from slit centre')
+            ax.set_ylabel('Flux')
+            for i in range(group_psf.shape[0]):
+                ax.plot(r, group_psf[i], lw=0.8, alpha=0.7)
+            fig.set_figheight(5)
+            fig.set_figwidth(10)
+            self._emit_figure(fig, category='group_spectra', filename='group_psf_lines', region=dataset.region)
+
+    def plot_std_spectrum(self, dataset: Dataset):
+        if self.output_mode == 'off':
+            return
+
+        w = dataset.products.get('step2_w_grid')
+        one_frame_spec = dataset.products.get('one_frame_spec')
+        if w is None or one_frame_spec is None:
+            return
+
+        one_frame_norm = one_frame_spec / (np.nanmedian(one_frame_spec, axis=1, keepdims=True) + 1e-12)
+        std_flux = np.nanstd(one_frame_norm, axis=0)
+        mean_std_flux = float(np.nanmean(std_flux))
+
+        dataset.products['std_flux'] = std_flux
+        dataset.products['mean_std_flux'] = mean_std_flux
+
+        fig, ax = plt.subplots()
+        ax.set_title('Step 2 - Std of one-frame spectra')
+        ax.set_xlabel('Wavelength [nm]')
+        ax.set_ylabel('Std flux')
+        ax.plot(w, std_flux, ms=2, color='green', label='std spectrum')
+        ax.axhline(mean_std_flux, color='red', lw=1.0, label='mean std')
+        ax.legend(loc='best')
+        fig.set_figheight(5)
+        fig.set_figwidth(10)
+        self._emit_figure(fig, category='group_spectra', filename='std_spectrum', region=dataset.region)
+
+    def plot_telluric_cut_spectra(self, dataset: Dataset):
+        if self.output_mode == 'off':
+            return
+
+        cut_spec = dataset.products.get('cut_spec')
+        cut_wavelength = dataset.products.get('cut_wavelength')
+        if cut_spec is None or cut_wavelength is None:
+            return
+
+        fig, ax = plt.subplots()
+        ax.set_title('Stellar Spectra after telluric lines removal')
+        ax.set_xlabel('Wavelength [nm]')
+        ax.set_ylabel('Flux')
+
+        for spec, wavelength in zip(cut_spec, [cut_wavelength] * len(cut_spec)):
+            if len(spec) == 0:
+                continue
+            med = np.nanmedian(spec)
+            if not np.isfinite(med) or med == 0.0:
+                med = 1.0
+            ax.plot(wavelength, spec / med, '.', ms=1)
+
+        ax.tick_params(color='blue', axis='x', labelsize=10)
+        fig.set_figheight(5)
+        fig.set_figwidth(10)
+        self._emit_figure(fig, category='group_spectra', filename='spectra_after_telluric_cut', region=dataset.region)
+
+    def plot_mss(self, dataset: Dataset):
+        """
+        Plot the Master Stellar Spectrum from the fitted spline.
+        
+        Uses wavelength range indices [2800:-3500] and evaluates the spline
+        for smooth visualization of the master stellar spectrum.
+        """
+        # Retrieve fitted spline and wavelength grid
+        master_wavelength = dataset.products['master_wavelength']
+        master_spec_spl = dataset.products['master_spec_spl']
+        
+        # Evaluate spline over wavelength range [2800:-3500] indices
+        w_eval = np.linspace(master_wavelength[2800],  master_wavelength[-3500], 3000)
+        flux_eval = master_spec_spl(w_eval)
+        
+        # Create figure
+        fig, ax = plt.subplots(figsize=(10, 5))
+        ax.plot(w_eval, flux_eval, '-', color='green', linewidth=1)
+        
+        ax.set_xlabel('Wavelength [nm]', fontsize=10)
+        ax.set_ylabel('Flux', fontsize=10)
+        ax.set_title('Master Stellar Spectrum', fontsize=11)
+        ax.tick_params(color='blue', axis='x', labelsize=10)
+        
+        self._emit_figure(fig, category='master_spectrum', filename='master_stellar_spectrum', region=dataset.region)
+
+    def plot_velocity_separation_image(self, dataset: Dataset):
+        if self.output_mode == 'off':
+            return
+
+        for data in dataset.items:
+            img_ccf = data.derived.get('img_separation_velocity')
+            r_position = data.derived.get('r_position_centered')
+            velocity = data.derived.get('vel_array')
+
+            if img_ccf is None or r_position is None or velocity is None:
+                continue
+
+            fig, ax = plt.subplots()
+            ax.set_title(f"Radial Velocity - Separation Image - {data.file_id}")
+            ax.set_xlabel('Radial Velocity [km/s]')
+            ax.set_ylabel('Separation [pixel units]')
+            ax.tick_params(color='blue', axis='x', labelsize=10)
+
+            bar = ax.pcolormesh(velocity, r_position, img_ccf, vmin=0.0, vmax=1.0, shading='auto')
+            fig.colorbar(bar, ax=ax)
+            fig.set_figheight(5)
+            fig.set_figwidth(10)
+
+            self._emit_figure(fig, category='step3_velocity_separation', filename=f'velocity_separation_{data.file_id}', region=data.region)
+

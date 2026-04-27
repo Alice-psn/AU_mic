@@ -9,6 +9,7 @@ from spectroscopy_processing import SpectroscopyProcessing
 from data_model import Data, Dataset
 
 def run_step1(dataset, spec_process, plotter):
+    print("Step 1")
     plotter.plot_initial_data(dataset)
 
     spec_process.rss(dataset)
@@ -25,12 +26,14 @@ def run_step1(dataset, spec_process, plotter):
     plotter.plot_spectrum_dataset(dataset)
     plotter.plot_psf_dataset(dataset, 'final')
 
+    print("Step 1.1")
     spec_process.minimize_dr(dataset)
     plotter.plot_interp_dr_dataset(dataset)
 
 
 
 def run_step1_2(dataset, spec_process, plotter):
+    print("Step 1.2")
     plotter.plot_initial_data(dataset)
 
     spec_process.psf_rough(dataset)
@@ -40,13 +43,33 @@ def run_step1_2(dataset, spec_process, plotter):
     plotter.plot_spectrum_dataset(dataset)
     plotter.plot_psf_dataset(dataset, 'final')
 
+    #spec_process.FWHM_estimation(dataset)
+    print("Step 2")
+    spec_process.ccf_reference_spectrum(dataset)
+    plotter.plot_group_spectra(dataset)
+    plotter.plot_std_spectrum(dataset)
+    
+    spec_process.telluric_cut(dataset)
+    plotter.plot_telluric_cut_spectra(dataset)
+    spec_process.mss(dataset)
+    plotter.plot_mss(dataset)
+
+    print("Step 3")
+    spec_process.correction_structures(dataset)
+    spec_process.final_residuals(dataset)
+    plotter.plot_residuals_dataset(dataset,'Final Residuals')
+
+    spec_process.image_separation_velocity(dataset)
+    plotter.plot_velocity_separation_image(dataset)
+
+
 
 def main(): #plot all spectra related to a region
     root = 'C:/Users/alice/Documents/Stage Suède/data/'
     plot_root = 'C:/Users/alice/Documents/Stage Suède/plots/'
     region = 'A12'
     file_manager = FileManager(root,region,nb_files=8)
-    plotter = Plotter('off',plot_root) #output_mode can be 'save', 'show', 'both' or 'off' (default is 'show')
+    plotter = Plotter('save',plot_root) #output_mode can be 'save', 'show', 'both' or 'off' (default is 'show')
     spec_process = SpectroscopyProcessing()
 
     dataset = file_manager.load_data()
