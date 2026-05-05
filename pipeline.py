@@ -62,21 +62,33 @@ def run_step1_2(dataset, spec_process, plotter):
     spec_process.image_separation_velocity(dataset)
     plotter.plot_velocity_separation_image(dataset)
 
+def run_step4(dataset_A,dataset_B,spec_process,plotter):
+    print("Step 4")
+    spec_process.group_velocity_separation(dataset_A, dataset_B)
+    plotter.plot_group_velocity_separation(dataset_A, dataset_B)
+
 
 
 def main(): #plot all spectra related to a region
     root = 'C:/Users/alice/Documents/Stage Suède/data/'
     plot_root = 'C:/Users/alice/Documents/Stage Suède/plots/'
-    region = 'A12'
-    file_manager = FileManager(root,region,nb_files=8)
     plotter = Plotter('save',plot_root) #output_mode can be 'save', 'show', 'both' or 'off' (default is 'show')
     spec_process = SpectroscopyProcessing()
 
-    dataset = file_manager.load_data()
-    run_step1(dataset, spec_process, plotter)
+    file_manager_A = FileManager(root,region='A12',nb_files=4)
+    file_manager_B = FileManager(root,region='B12',nb_files=4)
 
-    dataset_step1_2 = dataset.build_step1_2_dataset()
-    run_step1_2(dataset_step1_2, spec_process, plotter)
+    dataset_A = file_manager_A.load_data()
+    dataset_B = file_manager_B.load_data()
+    run_step1(dataset_A, spec_process, plotter)
+    #run_step1(dataset_B, spec_process, plotter)
+
+    dataset_step1_2_A = dataset_A.build_step1_2_dataset()
+    #dataset_step1_2_B = dataset_B.build_step1_2_dataset()
+    run_step1_2(dataset_step1_2_A, spec_process, plotter)
+    #run_step1_2(dataset_step1_2_B, spec_process, plotter)
+
+    #run_step4(dataset_step1_2_A, dataset_step1_2_B, spec_process, plotter)
 
 if __name__ == "__main__":
     main()

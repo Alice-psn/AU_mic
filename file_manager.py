@@ -18,8 +18,8 @@ class FileManager:
     """
     def __init__(self, root:str, region:str, nb_files:int=39):
         self.root = root
-        self.region = region #A12
-        self.nb_files = nb_files #4
+        self.region = region
+        self.nb_files = nb_files
         self.files = ['AUMic000_' + self.region +'.npy'] 
         for i in range(1, self.nb_files):
             self.files.append('AUMic' + str(i).zfill(3) + '_' + self.region +'.npy')

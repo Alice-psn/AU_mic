@@ -59,7 +59,6 @@ class Plotter:
         fig.set_figwidth(10)
         self._emit_figure(fig, category=category, filename=title, region=data.region)
 
-
     def plot_initial_data(self, dataset:Dataset):
         """ Plot the initial flux data for each file in the dataset
         """
@@ -130,16 +129,15 @@ class Plotter:
     ************ PSF *************
     """
 
-    def plot_psf(self, data: Data, psf: np.ndarray, psf_spl: sp.interpolate.LSQUnivariateSpline, spec_spl0: sp.interpolate.LSQUnivariateSpline, title=None):
+    def plot_psf(self, data: Data, psf_spl, spectrum_spl, title=None):
         if self.output_mode == 'off':
             return
-        values = data.derived.get('clean_values', data.raw_values)
+        values = data.derived.get('clipped_values', data.derived.get('clean_values', data.raw_values)) #not clear
         fig, ax1 = plt.subplots()
         plt.title('Final PSF' if title is None else title)
         plt.xlabel('r - distance from slit centre')
         plt.ylabel('Flux')
-        r = np.linspace(np.min(values['r']), np.max(values['r']), len(psf))
-        ax1.plot(values['r'], values['f']/spec_spl0(values['w']), '.', markersize=1)
+        ax1.plot(values['r'], values['f']/spectrum_spl(values['w']), '.', markersize=1)
         ax1.tick_params(color='blue', axis='x', labelsize=10)
         ax1.plot(values['r'], psf_spl(values['r']), '.', color='orange', markersize=0.5)
         fig.set_figheight(5)
@@ -152,21 +150,20 @@ class Plotter:
             return
         stage = stage.lower()
         if stage == 'rough':
-            psf_key = 'psf_rough'
             psf_spl_key = 'psf_rough_spl'
+            spec_spl_key = 'rss_interp'
             title_prefix = 'Rough PSF'
         else:
-            psf_key = 'psf'
             psf_spl_key = 'psf_spl'
+            spec_spl_key = 'spec_spl'
             title_prefix = 'Final PSF'
 
         for data in dataset.items:
-            psf = data.derived.get(psf_key)
             psf_spl = data.derived.get(psf_spl_key)
-            spec_spl0 = data.derived.get('rss_interp')
-            if psf is None or psf_spl is None or spec_spl0 is None:
+            spectrum_spl = data.derived.get(spec_spl_key)
+            if psf_spl is None or spectrum_spl is None:
                 continue
-            self.plot_psf(data, psf, psf_spl, spec_spl0, title=f"{title_prefix} - {data.file_id}")
+            self.plot_psf(data, psf_spl, spectrum_spl, title=f"{title_prefix} - {data.file_id}")
 
     """
     ************ Residuals *************
@@ -175,12 +172,12 @@ class Plotter:
     def plot_residuals(self, data: Data, title=None):
         if self.output_mode == 'off':
             return
-        image = data.derived.get('residual_image_raw', data.derived.get('residual_image'))
-        residual_data = data.derived.get('residual_data_raw', data.derived.get('residual_data'))
+        image = data.derived['residual_image']
+        residual_data = data.derived['residual_data']
         if image is None or residual_data is None:
             return
         plot_title = 'Residuals' if title is None else title
-        self.plot_image(image,residual_data,fmin=-10.0,fmax=10.0,title=plot_title,show_colorbar=True,category='residuals',)
+        self.plot_image(image,residual_data,fmin=-10.0,fmax=10.0,title=plot_title,show_colorbar=True,category='residuals')
 
     def plot_residuals_dataset(self, dataset: Dataset, title_prefix: str = 'Residuals'):
         if self.output_mode == 'off':
@@ -227,9 +224,6 @@ class Plotter:
     def plot_interp_dr(self, dr_spl, w0_array, dr_array, wdata, knots, title='dr correction for each interval dw', region: str = None):
         if self.output_mode == 'off':
             return
-        if dr_spl is None or w0_array is None or dr_array is None or wdata is None:
-            return
-
         fig, ax = plt.subplots()
         plt.title(title)
         plt.xlabel('Wavelength [nm]')
@@ -257,7 +251,6 @@ class Plotter:
             knots = data.derived.get('dr_knots')
             if dr_spl is None or w0_array is None or dr_array is None or wdata is None:
                 continue
-
             plot_title = f"dr correction for each interval dw - {data.file_id}" if title is None else title
             self.plot_interp_dr(dr_spl, w0_array, dr_array, wdata, knots, title=plot_title, region=data.region)
 
@@ -346,9 +339,6 @@ class Plotter:
         std_flux = np.nanstd(one_frame_norm, axis=0)
         mean_std_flux = float(np.nanmean(std_flux))
 
-        dataset.products['std_flux'] = std_flux
-        dataset.products['mean_std_flux'] = mean_std_flux
-
         fig, ax = plt.subplots()
         ax.set_title('Step 2 - Std of one-frame spectra')
         ax.set_xlabel('Wavelength [nm]')
@@ -390,11 +380,7 @@ class Plotter:
     def plot_mss(self, dataset: Dataset):
         """
         Plot the Master Stellar Spectrum from the fitted spline.
-        
-        Uses wavelength range indices [2800:-3500] and evaluates the spline
-        for smooth visualization of the master stellar spectrum.
         """
-        # Retrieve fitted spline and wavelength grid
         master_wavelength = dataset.products['master_wavelength']
         master_spec_spl = dataset.products['master_spec_spl']
         
@@ -402,7 +388,6 @@ class Plotter:
         w_eval = np.linspace(master_wavelength[2800],  master_wavelength[-3500], 3000)
         flux_eval = master_spec_spl(w_eval)
         
-        # Create figure
         fig, ax = plt.subplots(figsize=(10, 5))
         ax.plot(w_eval, flux_eval, '-', color='green', linewidth=1)
         
@@ -437,4 +422,64 @@ class Plotter:
             fig.set_figwidth(10)
 
             self._emit_figure(fig, category='step3_velocity_separation', filename=f'velocity_separation_{data.file_id}', region=data.region)
+
+    def _plot_step4_map(self, img_ccf: np.ndarray, r_position: np.ndarray, vel_array: np.ndarray, title: str, region: str | None = None):
+        if self.output_mode == 'off':
+            return
+
+        img = np.asarray(img_ccf, dtype=float)
+        finite_vals = img[np.isfinite(img)]
+        if finite_vals.size == 0:
+            return
+
+        vmax = float(np.nanpercentile(finite_vals, 99.0))
+        vmin = 0.0
+        if not np.isfinite(vmax) or vmax <= vmin:
+            vmax = float(np.nanmax(finite_vals)) if finite_vals.size > 0 else 1.0
+            if not np.isfinite(vmax) or vmax <= vmin:
+                vmax = 1.0
+
+        fig, ax = plt.subplots()
+        ax.set_title(title)
+        ax.set_xlabel('Radial Velocity [km/s]')
+        ax.set_ylabel('Separation [arcsec]')
+
+        r_arcsec = np.asarray(r_position, dtype=float) * 0.0373
+        bar = ax.pcolormesh(vel_array, r_arcsec, img, shading='auto', vmin=vmin, vmax=vmax)
+        fig.colorbar(bar, ax=ax)
+        fig.set_figheight(5)
+        fig.set_figwidth(10)
+        self._emit_figure(fig, category='step4_velocity_separation', filename=title, region=region)
+
+    def plot_group_velocity_separation(self, dataset_A: Dataset, dataset_B: Dataset):
+        if self.output_mode == 'off':
+            return
+
+        products = dataset_A.products if dataset_A.products.get('step4_night_slit_maps') is not None else dataset_B.products
+
+        night_slit_maps = products.get('step4_night_slit_maps')
+        night_combined = products.get('step4_night_combined')
+        all_nights = products.get('step4_all_nights_combined')
+        r_ref = products.get('step4_r_position')
+        v_ref = products.get('step4_vel_array')
+
+        if night_slit_maps is None or night_combined is None or all_nights is None or r_ref is None or v_ref is None:
+            return
+
+        region_label = products.get('step4_region', f"{dataset_A.region}_{dataset_B.region}")
+        night_keys = sorted(night_slit_maps.keys())
+
+        # 1) Per night and slit
+        for night in night_keys:
+            for slit in sorted(night_slit_maps[night].keys()):
+                title = f"Step4 - Night {night} - Slit {slit}"
+                self._plot_step4_map(night_slit_maps[night][slit], r_ref, v_ref, title, region_label)
+
+        # 2) Slits combined per night
+        for night in night_keys:
+            title = f"Step4 - Night {night} - Slits Combined"
+            self._plot_step4_map(night_combined[night], r_ref, v_ref, title, region_label)
+
+        # 3) Nights combined
+        self._plot_step4_map(all_nights, r_ref, v_ref, 'Step4 - All Nights Combined', region_label)
 

@@ -99,7 +99,7 @@ class Dataset:
             if src.derived.get('spec_spl') is not None:
                 new_data.derived['rss_interp'] = src.derived['spec_spl']
 
-            # Keep access to the original detector frame values for legacy-style residual plots.
+            # Keep access to the original detector frame values for residual plots.
             new_data.derived['raw_values_original'] = src.raw_values.copy()
             new_data.derived['clipped_values'] = new_data.raw_values
             new_data.derived['parent_file_id'] = src.file_id
