@@ -251,14 +251,14 @@ class SpectroscopyProcessing:
         return res_data
     
     @staticmethod
-    def sigma_clipping_mask(residual: np.ndarray, niter:int=5, klip:float=10):
+    def sigma_clipping_mask(residual: np.ndarray, niter:int=2, klip:float=3):
         sel = np.ones(len(residual), dtype='?')
         for _ in range(niter):
             sigma = np.std(residual[sel])
             sel = np.abs(residual) < klip * sigma
         return sel
 
-    def sigma_clipping(self, data: Data, niter:int=5, klip:float=10):
+    def sigma_clipping(self, data: Data, niter:int=2, klip:float=3):
         values = data.raw_values
         rss_interp = data.derived.get('rss_interp')
         psf_spl = data.derived.get('psf_rough_spl')
@@ -277,7 +277,7 @@ class SpectroscopyProcessing:
         data.masks['sigma_clip'] = sel
         return data
 
-    def sigma_clipping_dataset(self, dataset: Dataset, niter:int=2, klip:float=10):
+    def sigma_clipping_dataset(self, dataset: Dataset, niter:int=2, klip:float=3):
         for data in dataset.items:
             self.sigma_clipping(data, niter=niter, klip=klip)
         return dataset
@@ -361,6 +361,181 @@ class SpectroscopyProcessing:
             data.derived['err_psf'] = np.asarray(err_psf)
         return dataset
 
+    def refine_spectrum_psf_2d(self, dataset: Dataset, dr: float = 5.0):
+        """Single-pass spectrum fit using 2D PSF (no iteration)."""
+        for data in dataset.items:
+            values = data.derived.get('clipped_values', data.raw_values)
+            psf_2d_spl = data.derived.get('psf_2d_spl')
+            if psf_2d_spl is None:
+                continue
+
+            # Find r_star using 2D PSF at all wavelengths
+            psf_2d_vals = np.asarray(psf_2d_spl(values['r'], values['w'], grid=False), dtype=float)
+            ind_max = np.argmax(psf_2d_vals)
+            r_star = values['r'][ind_max]
+
+            # Single-pass spectrum fit using 2D PSF
+            ind = np.argsort(values['w'])
+            wdata = values[ind]
+            ind_dr = np.abs(wdata['r'] - r_star) < dr
+            data_sel = wdata[ind_dr]
+
+            denom = np.asarray(psf_2d_spl(data_sel['r'], data_sel['w'], grid=False), dtype=float)
+            valid = np.isfinite(denom) & (denom != 0.0) & np.isfinite(data_sel['f']) & np.isfinite(data_sel['e'])
+            data_sel = data_sel[valid]
+            denom = denom[valid]
+
+            spec = data_sel['f'] / denom
+            err_spec = data_sel['e'] / denom
+            with np.errstate(divide='ignore', invalid='ignore'):
+                weight = (denom / err_spec) ** 2
+            weight[~np.isfinite(weight)] = 0.0
+
+            knots = np.arange(data_sel['w'][10], data_sel['w'][-10], 0.015)
+            if len(knots) >= 1:
+                wavelength = data_sel['w']
+                spec_spl = sp.interpolate.LSQUnivariateSpline(data_sel['w'], spec, knots, weight)
+                data.derived['spec_spl'] = spec_spl
+                data.derived['spec'] = np.asarray(spec)
+                data.derived['err_spec'] = np.asarray(err_spec)
+                data.derived['weight'] = np.asarray(weight)
+                data.derived['wavelength'] = np.asarray(wavelength)
+        return dataset
+
+    def psf_true_2d(self, dataset: Dataset):
+        for data in dataset.items:
+            values = data.derived.get('clipped_values', data.raw_values)
+            spec_spl = data.derived.get('spec_spl')
+            psf_r_spl = data.derived.get('psf_spl', data.derived.get('psf_rough_spl'))
+            if values is None or spec_spl is None or psf_r_spl is None or len(values) == 0:
+                continue
+
+            # Build normalized PSF samples on raw points
+            ind = np.argsort(values['w'])
+            data_sorted = values[ind]
+            denom = spec_spl(data_sorted['w'])
+            valid = (np.isfinite(denom) & (denom != 0.0) & np.isfinite(data_sorted['f'])
+                     & np.isfinite(data_sorted['e']) & np.isfinite(data_sorted['r']) & np.isfinite(data_sorted['w']))
+            data_sorted = data_sorted[valid]
+            denom = denom[valid]
+
+            psf = data_sorted['f'] / denom
+            err_psf = data_sorted['e'] / denom
+            with np.errstate(divide='ignore', invalid='ignore'):
+                weight = (1.0 / err_psf) ** 2
+            weight[~np.isfinite(weight)] = 0.0
+
+            r_raw = np.asarray(data_sorted['r'], dtype=float)
+            w_raw = np.asarray(data_sorted['w'], dtype=float)
+            psf_raw = np.asarray(psf, dtype=float)  # Raw normalized PSF values
+            weight_raw = np.asarray(weight, dtype=float)
+
+            # Fixed knot counts
+            n_knots_r = 60
+            n_knots_w = 1
+            r_unique = np.unique(r_raw)
+            w_unique = np.unique(w_raw)
+            #k = int(len(r_unique) / n_knots_r)
+            #r_knots = r_unique[k:-k+1:k]
+            r0 = r_raw[np.argmax(psf_raw)]
+            u = np.arcsinh((r_unique - r0) / 3.0)
+            r_knots = r0 + 3.0 * np.sinh(np.linspace(u[1], u[-2], n_knots_r))
+            w_knots = np.linspace(w_unique[100],w_unique[-100],n_knots_w)
+            psf_2d_spl = sp.interpolate.LSQBivariateSpline(r_raw, w_raw, psf_raw, r_knots, w_knots, w=weight_raw)
+
+            data.derived['psf_2d_spl'] = psf_2d_spl
+            data.derived['r_knots'] = r_knots
+            data.derived['psf_2d'] = psf_raw  # Raw normalized PSF, independent of knot count
+            data.derived['err_psf_2d'] = 1.0 / np.sqrt(weight_raw + 1e-12)
+            data.derived['psf_2d_r'] = r_raw
+            data.derived['psf_2d_w'] = w_raw
+
+        return dataset
+
+    # From Markus
+    @staticmethod
+    def fit_spline_bivariate(pixel_array, oversample=1, knot_col=10, clip=5, niters=3, verbose=True, **kwargs):
+        """Fit a Bivariate spline to pixel arrays
+
+        Given a normalized pixel array (in the same form as output from
+        `norm_flux_coo`) this function fit bi-variate spline as a function of
+        pixel coordinates and column indices.
+
+        Parameters
+        ----------
+        pixel_array : ndarray
+        Normalized pixel array with pixel coordinates, normalized flux, normalized
+        variance, and column indices.
+        oversample : int, optional
+        Determines the number of knots in pixel coordindates direction. Default number
+        of knots is equal to total pixel numbers in aperture (corresponds to `oversample`=1).
+        If `oversample` is greater than 1, it will put oversamples*total pixel number knots
+        in pixel coordinate direction.
+        If `oversample` is an array it will be passed directly to LSQBivariateSpline
+        as tx argument: Strictly ordered 1-D sequences of knots coordinates
+        knot_col : int, optional
+        Number of knots in column indices direction.
+        Default is 10.
+        If `knot_col` is an array it will be passed directly to LSQBivariateSpline
+        as ty argument: Strictly ordered 1-D sequences of knots coordinates
+        clip : int, optinal
+        Number of sigmas to perform sigma clipping while fitting a spline.
+        Default is 5.
+        niter : int, optional
+        Number of iteration to perform
+        Default is 3.
+        verbose : bool, optional
+        Boolean on whether to print details or not.
+        Default is True.
+        **kwargs :
+        Additional keywords provided to LSQBivariateSpline
+
+        Returns
+        -------
+        psf_spline : scipy.interpolate.LSQBivariateSpline object
+        Fitted spline object.
+        mask : ndarray
+        Array containing location of masked points.
+        """
+
+        if (isinstance(oversample, int)):
+            x1k, x2k = np.min(pixel_array[:,0]) + 1/oversample, np.max(pixel_array[:,0]) - 1/oversample
+            xknots = np.linspace(x1k, x2k, int(x2k-x1k)*int(oversample))
+        else: xknots = oversample
+
+        if (isinstance(knot_col, int)):
+            y1k, y2k = np.min(pixel_array[:,3]) + 1, np.max(pixel_array[:,3]) - 1
+            yknots = np.linspace(y1k, y2k, int(knot_col))
+        else:
+            yknots = knot_col
+
+        # Mask for bad pixels
+        mask_bp = np.asarray(pixel_array[:,4], dtype=bool)
+
+        weights = np.maximum(1/pixel_array[:,2], 0)
+        psf_spline = sp.interpolate.LSQBivariateSpline(x=pixel_array[mask_bp,0], y=pixel_array[mask_bp,3],\
+        z=pixel_array[mask_bp,1],\
+        tx=xknots, ty=yknots,\
+        w=weights[mask_bp], **kwargs)
+
+        mask = np.ones(len(pixel_array[:,0]), dtype=bool) * mask_bp
+        for i in range(niters):
+            # Sigma clipping
+            resids = pixel_array[:,1] - psf_spline(pixel_array[:,0], pixel_array[:,3], grid=False)
+            limit = np.median(resids[mask]) + (clip*np.std(resids[mask]))
+            mask = np.abs(resids) < limit
+            mask = mask * mask_bp
+            # And spline fitting
+            psf_spline = sp.interpolate.LSQBivariateSpline(x=pixel_array[mask,0], y=pixel_array[mask,3],\
+            z=pixel_array[mask,1],\
+            tx=xknots, ty=yknots,\
+            w=weights[mask], **kwargs)
+
+            if verbose:
+                print('Iter {:d} / {:d}: {:.5f} per cent masked.'.format(i+1, niters, 100 - 100*np.sum(mask)/len(pixel_array[:,0])))
+        return psf_spline, mask
+
+
     """
     ************ r correction *************
     """
@@ -427,7 +602,7 @@ class SpectroscopyProcessing:
         return dataset
 
     """
-    ************ Telluric cut and corrections *************
+    ************ Telluric cut and structure correction *************
     """
 
     def FWHM_estimation(self, dataset: Dataset):
@@ -455,28 +630,23 @@ class SpectroscopyProcessing:
         dataset.products['star_position'] = np.asarray(star_pos_arr)
         return dataset
 
-    def ccf_reference_spectrum(self, dataset: Dataset):
+    def group_spectra(self, dataset: Dataset):
         if len(dataset.items) == 0:
             return dataset
 
         n_files = len(dataset.items)
         n_wave = 3000
-        n_vel = 2000
-        vel_array = np.linspace(-10.0, 10.0, n_vel)
 
         group_spec = np.full((n_files, n_wave), np.nan, dtype=float)
         group_psf = np.full((n_files, n_wave), np.nan, dtype=float)
         one_frame_spec = np.full((n_files, n_wave), np.nan, dtype=float)
         w_shift = np.full((n_files, n_wave), np.nan, dtype=float)
-        vel_shift = np.full(n_files, np.nan, dtype=float)
         barycorr = np.full(n_files, np.nan, dtype=float)
         vel = np.full(n_files, np.nan, dtype=float)
-        ccf_values = np.full((n_files, n_vel), np.nan, dtype=float)
 
         master_wavelength = []
         master_spec = []
         master_weight = []
-        reference_spec = None
         wavelength_grid = None
         r_grid = None
 
@@ -502,29 +672,14 @@ class SpectroscopyProcessing:
             group_spec[j, :] = spec_spl(w)
             group_psf[j, :] = psf_spl(r)
 
-            if reference_spec is None:
-                reference_spec = group_spec[j, :].copy()
+            if wavelength_grid is None:
                 wavelength_grid = w.copy()
                 r_grid = r.copy()
-
-            ccf_array = self.cross_correlation_velocity_clump(w, reference_spec, spec_spl, vel_array)
-            ccf_values[j, :] = ccf_array
-            vel_shift[j] = float(vel_array[np.argmax(ccf_array)])
 
             barycorr[j] = self._barycentric_correction_kms(j)
             vel[j] = -barycorr[j]
             w_shift[j, :] = self.doppler_shift(w, vel[j])
             one_frame_spec[j, :] = spec_spl(w_shift[j, :])
-
-            # data.derived['step2_wavelength_grid'] = w
-            # data.derived['step2_r_grid'] = r
-            # data.derived['ccf_velocity_grid'] = vel_array
-            # data.derived['ccf_values'] = ccf_array
-            # data.derived['velocity_shift'] = vel_shift[j]
-            # data.derived['barycorr_kms'] = barycorr[j]
-            # data.derived['velocity_after_barycorr'] = vel[j]
-            # data.derived['w_shift_grid'] = w_shift[j, :]
-            # data.derived['one_frame_spec'] = one_frame_spec[j, :]
 
             spec = data.derived['spec']
             wavelength = data.derived['wavelength']
@@ -537,17 +692,11 @@ class SpectroscopyProcessing:
                     master_wavelength.extend(wavelength_shift.tolist())
                     master_weight.extend(weight.tolist())
 
-        # dataset.products['ccf_vel_grid'] = vel_array
-        # dataset.products['ccf_values'] = ccf_values
-        # dataset.products['vel_shift'] = vel_shift
-        # dataset.products['barycorr_kms'] = barycorr
-        # dataset.products['vel_after_barycorr'] = vel
         dataset.products['step2_w_grid'] = wavelength_grid
         dataset.products['step2_r_grid'] = r_grid
         dataset.products['group_spec'] = group_spec
         dataset.products['group_psf'] = group_psf
         dataset.products['one_frame_spec'] = one_frame_spec
-        # dataset.products['w_shift'] = w_shift
         dataset.products['master_wavelength_raw'] = np.asarray(master_wavelength)
         dataset.products['master_spec_raw'] = np.asarray(master_spec)
         dataset.products['master_weight_raw'] = np.asarray(master_weight)
@@ -556,17 +705,6 @@ class SpectroscopyProcessing:
     def doppler_shift(self, wavelength: np.ndarray, velocity_kms: float):
         doppler = 1.0 + (velocity_kms / (sp.constants.c * 0.001))
         return wavelength * doppler
-
-    @staticmethod
-    def cross_correlation(shift_spec: np.ndarray, template_spec: np.ndarray):
-        return float(np.sum(shift_spec * template_spec))
-
-    def cross_correlation_velocity_clump(self, wavelength: np.ndarray, spec_clump: np.ndarray, template_spec, vel_array: np.ndarray):
-        ccf_array = np.zeros(len(vel_array))
-        for i, vel in enumerate(vel_array):
-            w_shift = self.doppler_shift(wavelength, float(vel))
-            ccf_array[i] = self.cross_correlation(spec_clump, template_spec(w_shift))
-        return ccf_array
 
     def telluric_cut(self, dataset: Dataset):
         if len(dataset.items) == 0:
@@ -654,37 +792,42 @@ class SpectroscopyProcessing:
         return dataset
 
     def final_residuals(self, dataset: Dataset):
-        """Compute final residuals on the raw-frame geometry only."""
+        """Compute final residuals using r-corrected data (in data.raw_values)."""
         for data in dataset.items:
             spec_spl = data.derived.get('spec_spl')
+            psf_2d_spl = data.derived.get('psf_2d_spl')
             psf_spl = data.derived.get('psf_spl')
-            values_raw = data.derived.get('raw_values_original', data.raw_values)
+            r_corrected_values = data.raw_values
 
-            if spec_spl is None or psf_spl is None or values_raw is None or len(values_raw) == 0:
+            if spec_spl is None or (psf_2d_spl is None and psf_spl is None) or r_corrected_values is None or len(r_corrected_values) == 0:
                 continue
 
-            # Optionally apply structure masking, still on raw (non r-corrected) geometry.
+            # Optionally apply structure masking (on r-corrected values).
             use_corrected = bool(data.derived.get('structure_correction_applied', False))
             if use_corrected:
-                values = data.derived.get('structure_corrected_raw_values', values_raw)
+                values = data.derived.get('structure_corrected_values', r_corrected_values)
             else:
-                values = values_raw
+                values = r_corrected_values
 
             if values is None or len(values) == 0:
                 continue
 
             ind_r = np.argsort(values['r'])
             rdata = values[ind_r]
-            model_flux = spec_spl(rdata['w']) * psf_spl(rdata['r'])
+            if psf_2d_spl is not None:
+                psf_eval = np.asarray(psf_2d_spl(rdata['r'], rdata['w'], grid=False), dtype=float)
+            else:
+                psf_eval = np.asarray(psf_spl(rdata['r']), dtype=float)
+            model_flux = spec_spl(rdata['w']) * psf_eval
             denom = np.asarray(rdata['e'], dtype=float)
             with np.errstate(divide='ignore', invalid='ignore'):
                 final_res = np.where(denom != 0.0, (rdata['f'] - model_flux) / denom, np.nan)
 
-            # Legacy step3 behavior: structure-masked pixels are exactly zero in residual map.
+            # Applied structure correction: set masked pixels to zero in residual.
             if use_corrected:
-                structure_mask_raw = data.derived.get('structure_mask_raw')
-                if structure_mask_raw is not None and len(structure_mask_raw) == len(values):
-                    mask_sorted = np.asarray(structure_mask_raw)[ind_r]
+                structure_mask = data.derived.get('structure_mask')
+                if structure_mask is not None and len(structure_mask) == len(values):
+                    mask_sorted = np.asarray(structure_mask)[ind_r]
                     final_res[mask_sorted] = 0.0
 
             corrected_table = rdata.copy()
@@ -699,7 +842,7 @@ class SpectroscopyProcessing:
                 derived=data.derived,
             )
 
-            # Keep one residual product on raw-frame geometry.
+            # Keep residual product (on r-corrected geometry if available).
             residual_image = self.make_image(res_data)
             data.derived['residual_data'] = res_data
             data.derived['residual_image'] = residual_image
@@ -707,7 +850,7 @@ class SpectroscopyProcessing:
         return dataset
     
     def correction_structures(self, dataset: Dataset):
-        """Correction of weird structure inside the image:"""
+        """Correction of weird structure inside the image (applied to r-corrected values):"""
         correction_ranges = {
             'A11': ((165, 275), (300, 370)),
             'A12': ((7, 46),),
@@ -715,19 +858,19 @@ class SpectroscopyProcessing:
         }
 
         for data in dataset.items:
-            raw_values_original = data.derived.get('raw_values_original', data.raw_values) #not r-corrected
-            corrected_raw_values = raw_values_original.copy()
-            structure_mask_raw = np.zeros(len(corrected_raw_values), dtype=bool)
+            r_corrected_values = data.raw_values
+            corrected_values = r_corrected_values.copy()
+            structure_mask = np.zeros(len(corrected_values), dtype=bool)
             ranges = correction_ranges.get(data.region, ())
 
             for start_x, end_x in ranges:
                 for x_val in range(start_x, end_x):
-                    sel_col_raw = corrected_raw_values['x'] == x_val
-                    corrected_raw_values['f'][sel_col_raw] = 0.0
-                    structure_mask_raw[sel_col_raw] = True
+                    sel_col = corrected_values['x'] == x_val
+                    corrected_values['f'][sel_col] = 0.0
+                    structure_mask[sel_col] = True
 
-            data.derived['structure_corrected_raw_values'] = corrected_raw_values
-            data.derived['structure_mask_raw'] = structure_mask_raw
+            data.derived['structure_corrected_values'] = corrected_values
+            data.derived['structure_mask'] = structure_mask
             data.derived['structure_correction_applied'] = data.region in correction_ranges
 
 
@@ -737,7 +880,18 @@ class SpectroscopyProcessing:
     ************ CCF *************
     """
 
-    def image_separation_velocity(self, dataset: Dataset):
+    @staticmethod
+    def cross_correlation(shift_spec: np.ndarray, template_spec: np.ndarray):
+        return float(np.sum(shift_spec * template_spec))
+
+    def cross_correlation_velocity_clump(self, wavelength: np.ndarray, spec_clump: np.ndarray, template_spec, vel_array: np.ndarray):
+        ccf_array = np.zeros(len(vel_array))
+        for i, vel in enumerate(vel_array):
+            w_shift = self.doppler_shift(wavelength, float(vel))
+            ccf_array[i] = self.cross_correlation(spec_clump, template_spec(w_shift))
+        return ccf_array
+
+    def ccf_image_separation_velocity(self, dataset: Dataset):
         if len(dataset.items) == 0:
             return dataset
 
@@ -756,8 +910,9 @@ class SpectroscopyProcessing:
 
         for j, data in enumerate(dataset.items):
             residual_data = data.derived.get('residual_data')
+            psf_2d_spl = data.derived.get('psf_2d_spl')
             psf_spl = data.derived.get('psf_spl')
-            if residual_data is None or psf_spl is None:
+            if residual_data is None or (psf_2d_spl is None and psf_spl is None):
                 continue
 
             values = residual_data.raw_values
@@ -773,7 +928,7 @@ class SpectroscopyProcessing:
             shift_values['w'] = self.doppler_shift(values['w'], -barycorr_kms)
 
             for i, r_pos in enumerate(r_position):
-                spec_clump_spl = self._clump_spectrum(values, r_pos, dr)
+                spec_clump_spl = self._clump_spectrum(values, r_pos, dr) # residual spectrum at given r position
                 if spec_clump_spl is None:
                     continue
 
@@ -788,23 +943,14 @@ class SpectroscopyProcessing:
 
                 # Shift mask back to ERF
                 w_with_cut = self.doppler_shift(w_with_cut, barycorr_kms)
-                w_master_with_cut = w_with_cut.copy()
-
-                ccf_array = np.zeros(lenv, dtype=float)
                 clump_vals = spec_clump_spl(w_with_cut)
-                if not np.any(np.isfinite(clump_vals)):
-                    continue
-
-                for v_idx, vel in enumerate(vel_array):
-                    w_shift = self.doppler_shift(w_master_with_cut, vel)
-                    master_vals = master_spec_spl(w_shift)
-                    valid = np.isfinite(clump_vals) & np.isfinite(master_vals)
-                    if np.any(valid):
-                        ccf_array[v_idx] = float(np.sum(clump_vals[valid] * master_vals[valid])) #cross-correlation
-
+                ccf_array = self.cross_correlation_velocity_clump(w_with_cut, clump_vals, master_spec_spl, vel_array)
                 img_ccf_erf[i, :] = ccf_array
 
-            ind_max = int(np.nanargmax(psf_spl(values['r'])))
+            if psf_2d_spl is not None:
+                ind_max = int(np.nanargmax(psf_2d_spl(values['r'], values['w'], grid=False)))
+            else:
+                ind_max = int(np.nanargmax(psf_spl(values['r'])))
             r_star = float(values['r'][ind_max])
             r_position_centered = r_position - r_star
 

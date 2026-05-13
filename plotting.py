@@ -145,10 +145,122 @@ class Plotter:
         file_title = 'PSF' if title is None else title
         self._emit_figure(fig, category='psf', filename=file_title, region=data.region)
 
+    def plot_psf_2d(self, data: Data, psf_2d_spl, title=None):
+        """Plot 2D PSF as a heatmap over (r, w) grid."""
+        if self.output_mode == 'off':
+            return
+        
+        psf_2d_r = data.derived.get('psf_2d_r')
+        psf_2d_w = data.derived.get('psf_2d_w')
+        
+        if psf_2d_r is None or psf_2d_w is None or len(psf_2d_r) == 0:
+            return
+        
+        # Create regular grid for evaluation
+        r_min, r_max = np.min(psf_2d_r), np.max(psf_2d_r)
+        w_min, w_max = np.min(psf_2d_w), np.max(psf_2d_w)
+        
+        nr, nw = 100, 100
+        r_grid = np.linspace(r_min, r_max, nr)
+        w_grid = np.linspace(w_min, w_max, nw)
+        R, W = np.meshgrid(r_grid, w_grid)
+        
+        # Evaluate spline on grid
+        Z = psf_2d_spl(R, W, grid=False)
+        
+        # Clip to physical bounds [0, 0.35]
+        Z_clipped = np.clip(Z, 0, 0.35)
+        
+        # Create heatmap
+        fig, ax = plt.subplots()
+        plt.title('2D PSF (r, w)' if title is None else title)
+        plt.xlabel('r - distance from slit centre')
+        plt.ylabel('Wavelength [nm]')
+        
+        # Plot heatmap with fixed scale
+        bar = ax.pcolormesh(r_grid, w_grid, Z_clipped, shading='auto', cmap='viridis', vmin=0, vmax=0.35)
+        fig.colorbar(bar, ax=ax, label='Normalized PSF')
+        
+        ax.tick_params(color='blue', axis='x', labelsize=10)
+        fig.set_figheight(7)
+        fig.set_figwidth(10)
+        
+        file_title = '2D PSF' if title is None else title
+        self._emit_figure(fig, category='psf_2d', filename=file_title, region=data.region)
+
+    def plot_slice_psf_2d(self, dataset: Dataset):
+        if self.output_mode == 'off':
+            return
+
+        for data in dataset.items:
+            psf_2d_spl = data.derived.get('psf_2d_spl')
+            if psf_2d_spl is None:
+                continue
+
+            psf_w = data.derived.get('psf_2d_w') # data sorted by w
+            psf_r = data.derived.get('psf_2d_r') # data sorted by r
+            psf_vals = data.derived.get('psf_2d')
+            if psf_r is None or psf_w is None or psf_vals is None:
+                continue
+
+            w_slice = float(np.median(psf_w))
+            #w_slice_2 = 1694.0
+            r_min, r_max = float(np.min(psf_r)), float(np.max(psf_r))
+            r_grid = np.linspace(r_min, r_max, 400)
+
+            fig, ax = plt.subplots()
+            plot_title = f"PSF slice - {data.file_id}"
+            plt.title(plot_title)
+            plt.xlabel('r - distance from slit centre')
+            plt.ylabel('Normalized PSF')
+
+            # 2D spline slice at w_slice
+            z_grid = np.asarray(psf_2d_spl(r_grid, w_slice), dtype=float)
+            #z_prim_grid = np.asarray(psf_2d_spl(r_grid, w_slice_2), dtype=float)
+            ax.plot(r_grid, z_grid, '-', color='green', lw=1.5, label='2D PSF slice w=w_slice')
+            #ax.plot(r_grid, z_prim_grid, '--', color='orange', lw=1.5, label='2D PSF slice w=1694nm')
+
+            # Data points near the selected wavelength
+            tol = max(1e-6, (np.nanmax(psf_w) - np.nanmin(psf_w)) / 50.0) # 1/50 of the total wavelength range
+            sel = np.isfinite(psf_w) & (np.abs(psf_w - w_slice) <= tol)
+            if np.any(sel):
+                ax.plot(np.asarray(psf_r)[sel], np.asarray(psf_vals)[sel], '.', color='black', ms=3, label='data points')
+
+            # 1D radial PSF
+            psf_1d = data.derived.get('psf_spl') or data.derived.get('psf_rough_spl')
+            if psf_1d is not None:
+                p1d = np.asarray(psf_1d(r_grid), dtype=float)
+                ax.plot(r_grid, p1d, '--', color='red', lw=1.0, label='1D PSF')
+
+            # Plot knots
+            r_knots = data.derived.get('r_knots')
+            if r_knots is not None and len(r_knots) > 0:
+                r_knots = np.asarray(r_knots, dtype=float)
+                k_vals = np.asarray(psf_2d_spl(r_knots, w_slice), dtype=float)
+                ax.plot(r_knots, k_vals, 'x', color='blue', ms=6, label='knots')
+
+            ax.legend(loc='best')
+            ax.tick_params(color='blue', axis='x', labelsize=10)
+            fig.set_figheight(5)
+            fig.set_figwidth(10)
+            self._emit_figure(fig, category='psf', filename=plot_title, region=data.region)
+
+
     def plot_psf_dataset(self, dataset: Dataset, stage: str = ''):
         if self.output_mode == 'off':
             return
         stage = stage.lower()
+        
+        # Handle 2D PSF case
+        if '2d' in stage:
+            for data in dataset.items:
+                psf_2d_spl = data.derived.get('psf_2d_spl')
+                if psf_2d_spl is None:
+                    continue
+                self.plot_psf_2d(data, psf_2d_spl, title=f"2D PSF - {data.file_id}")
+            return
+        
+        # Handle 1D PSF cases
         if stage == 'rough':
             psf_spl_key = 'psf_rough_spl'
             spec_spl_key = 'rss_interp'
@@ -255,7 +367,7 @@ class Plotter:
             self.plot_interp_dr(dr_spl, w0_array, dr_array, wdata, knots, title=plot_title, region=data.region)
 
     """
-    ************ CCF *************
+    ************ Group spectra *************
     """
 
     def plot_group_spectra(self, dataset: Dataset):
