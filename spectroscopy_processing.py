@@ -7,6 +7,7 @@ from data_model import Data, Dataset
 import numpy as np
 import scipy as sp
 import warnings
+import matplotlib.pyplot as plt
 
 try:
     from astropy.time import Time
@@ -334,7 +335,7 @@ class SpectroscopyProcessing:
         spec_spl = sp.interpolate.LSQUnivariateSpline(data['w'], spec, knots, weight)
         return spec_spl, spec, err_spec, weight, wavelength
 
-    def refine_spectrum_psf(self, dataset: Dataset, m_iter: int = 3, dr: float = 5.0):
+    def refine_spectrum_psf(self, dataset: Dataset, m_iter: int = 3, dr: float = 15.0):
         for data in dataset.items:
             clipped_values = data.derived.get('clipped_values')
             psf_rough_spl = data.derived.get('psf_rough_spl')
@@ -361,7 +362,7 @@ class SpectroscopyProcessing:
             data.derived['err_psf'] = np.asarray(err_psf)
         return dataset
 
-    def refine_spectrum_psf_2d(self, dataset: Dataset, dr: float = 5.0):
+    def refine_spectrum_psf_2d(self, dataset: Dataset, dr: float = 15.0):
         """Single-pass spectrum fit using 2D PSF (no iteration)."""
         for data in dataset.items:
             values = data.derived.get('clipped_values', data.raw_values)
@@ -377,7 +378,7 @@ class SpectroscopyProcessing:
             # Single-pass spectrum fit using 2D PSF
             ind = np.argsort(values['w'])
             wdata = values[ind]
-            ind_dr = np.abs(wdata['r'] - r_star) < dr
+            ind_dr = np.abs(wdata['r'] - r_star) < dr # around the star
             data_sel = wdata[ind_dr]
 
             denom = np.asarray(psf_2d_spl(data_sel['r'], data_sel['w'], grid=False), dtype=float)
@@ -432,7 +433,7 @@ class SpectroscopyProcessing:
 
             # Fixed knot counts
             n_knots_r = 60
-            n_knots_w = 1
+            n_knots_w = 2
             r_unique = np.unique(r_raw)
             w_unique = np.unique(w_raw)
             #k = int(len(r_unique) / n_knots_r)
@@ -441,7 +442,9 @@ class SpectroscopyProcessing:
             u = np.arcsinh((r_unique - r0) / 3.0)
             r_knots = r0 + 3.0 * np.sinh(np.linspace(u[1], u[-2], n_knots_r))
             w_knots = np.linspace(w_unique[100],w_unique[-100],n_knots_w)
-            psf_2d_spl = sp.interpolate.LSQBivariateSpline(r_raw, w_raw, psf_raw, r_knots, w_knots, w=weight_raw)
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                psf_2d_spl = sp.interpolate.LSQBivariateSpline(r_raw, w_raw, psf_raw, r_knots, w_knots, w=weight_raw)
 
             data.derived['psf_2d_spl'] = psf_2d_spl
             data.derived['r_knots'] = r_knots
@@ -589,7 +592,10 @@ class SpectroscopyProcessing:
             dr_spl = sp.interpolate.LSQUnivariateSpline(w0_array, dr_array, knots)
 
             corrected_values = data.raw_values.copy()
-            corrected_values['r'] = corrected_values['r'] - dr_spl(corrected_values['w'])
+            corrected_values['r'] = corrected_values['r'] - dr_spl(corrected_values['w']) 
+            r0 = np.max(corrected_values['r'])
+            print(r0)
+            corrected_values['r'] = corrected_values['r'] - r0
 
             data.derived['dr_w0'] = w0_array
             data.derived['dr_values'] = dr_array
@@ -688,13 +694,14 @@ class SpectroscopyProcessing:
                 median_spec = np.median(spec)
                 if np.isfinite(median_spec) and median_spec != 0.0:
                     master_spec.extend((spec / median_spec).tolist())
-                    wavelength_shift = self.doppler_shift(wavelength, -vel[j])
-                    master_wavelength.extend(wavelength_shift.tolist())
+                    master_wavelength_shift = self.doppler_shift(wavelength, -vel[j]) #was initially -vel[j] 
+                    master_wavelength.extend(master_wavelength_shift.tolist())
                     master_weight.extend(weight.tolist())
 
         dataset.products['step2_w_grid'] = wavelength_grid
         dataset.products['step2_r_grid'] = r_grid
         dataset.products['group_spec'] = group_spec
+        #dataset.products['w_shift'] = w_shift
         dataset.products['group_psf'] = group_psf
         dataset.products['one_frame_spec'] = one_frame_spec
         dataset.products['master_wavelength_raw'] = np.asarray(master_wavelength)
@@ -780,14 +787,13 @@ class SpectroscopyProcessing:
         knots = np.arange(master_wavelength[30], master_wavelength[-30], 0.015)
         
         # Fit spline with weights
-        master_spec_spl = sp.interpolate.LSQUnivariateSpline(
-            master_wavelength, master_spec, knots, master_weight
-        )
+        master_spec_spl = sp.interpolate.LSQUnivariateSpline(master_wavelength, master_spec, knots, master_weight)
         
         # Store results in dataset.products
         dataset.products['master_wavelength'] = master_wavelength
         #dataset.products['master_spec'] = master_spec
         dataset.products['master_spec_spl'] = master_spec_spl
+        dataset.products['master_weight'] = master_weight
         
         return dataset
 
@@ -882,7 +888,9 @@ class SpectroscopyProcessing:
 
     @staticmethod
     def cross_correlation(shift_spec: np.ndarray, template_spec: np.ndarray):
-        return float(np.sum(shift_spec * template_spec))
+        shift_spec_z = (shift_spec - np.mean(shift_spec)) / np.std(shift_spec)
+        template_spec_z = (template_spec - np.mean(template_spec)) / np.std(template_spec)
+        return float(np.mean(shift_spec_z * template_spec_z))
 
     def cross_correlation_velocity_clump(self, wavelength: np.ndarray, spec_clump: np.ndarray, template_spec, vel_array: np.ndarray):
         ccf_array = np.zeros(len(vel_array))
@@ -891,21 +899,40 @@ class SpectroscopyProcessing:
             ccf_array[i] = self.cross_correlation(spec_clump, template_spec(w_shift))
         return ccf_array
 
-    def ccf_image_separation_velocity(self, dataset: Dataset):
+    
+
+    def ccf_image_separation_velocity(self, dataset: Dataset, star_spec: str):
+        """
+        Compute cross correlation between the residuals and the stellar spectrum (master or model), star_spec is 'master' or 'model'.
+        If 'model', fit a spline of the stellar model
+        """
         if len(dataset.items) == 0:
             return dataset
 
-        master_spec_spl = dataset.products.get('master_spec_spl')
-        w_telluric = np.asarray(dataset.products.get('w_telluric', np.array([])), dtype=float)
-        if master_spec_spl is None:
-            return dataset
+        if 'model' in star_spec and dataset.stellar_model_path is not None :
+            stellar_model_path = dataset.stellar_model_path
+            model_spec = np.load(stellar_model_path, allow_pickle=True)
+            w = model_spec[:,0]
+            f = model_spec[:,1]
+            f = f/np.median(f)
+            first_data = dataset.items[0]
+            min_w, max_w = np.min(first_data.raw_values['w']), np.max(first_data.raw_values['w'])
+            mask = (w >= min_w) & (w <= max_w)
+            w,f = w[mask], f[mask]
+            knots = np.arange(w[30], w[-30], 0.015)
+            spec_spl = sp.interpolate.LSQUnivariateSpline(w,f, knots)
+            dataset.products['stellar_model_spec_spl'] = spec_spl
+        else :
+            spec_spl = dataset.products.get('master_spec_spl')
 
+        w_telluric = np.asarray(dataset.products.get('w_telluric', np.array([])), dtype=float)
+        print(w_telluric)
         vmax = float(self.params.get('step3_vmax', 100.0))
         vmin = float(self.params.get('step3_vmin', -100.0))
         lenv = int(vmax - vmin + 1)
         vel_array = np.linspace(vmin, vmax, lenv)
-        delta_w = float(self.params.get('step3_delta_w', 0.15))
-        dr = float(self.params.get('step3_dr', 2.0))
+        delta_w = float(self.params.get('step3_delta_w', 0.15)) # why 0.15 ?
+        dr = float(self.params.get('step3_dr', 2.0)) # why 2.0 ?
         dw = vmax / (sp.constants.c * 0.001)
 
         for j, data in enumerate(dataset.items):
@@ -923,7 +950,7 @@ class SpectroscopyProcessing:
 
             img_ccf_erf = np.full((lenr, lenv), np.nan, dtype=float)
 
-            barycorr_kms = float(data.derived.get('barycorr_kms', self._barycentric_correction_kms(j)))
+            barycorr_kms = self._barycentric_correction_kms(j)
             shift_values = values.copy()
             shift_values['w'] = self.doppler_shift(values['w'], -barycorr_kms)
 
@@ -932,7 +959,7 @@ class SpectroscopyProcessing:
                 if spec_clump_spl is None:
                     continue
 
-                w = np.linspace(np.min(shift_values['w']) * (1.0 + dw), np.max(shift_values['w']) * (1.0 - dw), 3000)
+                w = np.linspace(np.min(shift_values['w']) * (1.0 + dw), np.max(shift_values['w']) * (1.0 - dw), 3000) #safe grid for CCF
                 w_with_cut = np.asarray(w, dtype=float).copy()
 
                 for w_peak in w_telluric:
@@ -944,7 +971,7 @@ class SpectroscopyProcessing:
                 # Shift mask back to ERF
                 w_with_cut = self.doppler_shift(w_with_cut, barycorr_kms)
                 clump_vals = spec_clump_spl(w_with_cut)
-                ccf_array = self.cross_correlation_velocity_clump(w_with_cut, clump_vals, master_spec_spl, vel_array)
+                ccf_array = self.cross_correlation_velocity_clump(w_with_cut, clump_vals, spec_spl, vel_array)
                 img_ccf_erf[i, :] = ccf_array
 
             if psf_2d_spl is not None:

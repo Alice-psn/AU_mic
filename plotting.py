@@ -379,6 +379,7 @@ class Plotter:
         group_spec = dataset.products.get('group_spec')
         group_psf = dataset.products.get('group_psf')
         one_frame_spec = dataset.products.get('one_frame_spec')
+        w_shift = dataset.products.get('w_shift')
         if w is None or group_spec is None or one_frame_spec is None:
             return
 
@@ -411,7 +412,7 @@ class Plotter:
         ax.set_title('Step 2 - One reference frame image')
         ax.set_xlabel('Wavelength [nm]')
         ax.set_ylabel('Frame index')
-        bar = ax.pcolormesh(w, group, one_frame_norm, shading='auto')
+        bar = ax.pcolormesh(w, group, one_frame_norm, shading='auto')  #one_frame_norm(w) actually processes w_shift 
         fig.colorbar(bar, ax=ax)
         fig.set_figheight(5)
         fig.set_figwidth(10)
@@ -495,6 +496,8 @@ class Plotter:
         """
         master_wavelength = dataset.products['master_wavelength']
         master_spec_spl = dataset.products['master_spec_spl']
+        master_weight = dataset.products['master_weight']
+        #master_spec = dataset.products['master_spec']
         
         # Evaluate spline over wavelength range [2800:-3500] indices
         w_eval = np.linspace(master_wavelength[2800],  master_wavelength[-3500], 3000)
@@ -507,6 +510,17 @@ class Plotter:
         ax.set_ylabel('Flux', fontsize=10)
         ax.set_title('Master Stellar Spectrum', fontsize=11)
         ax.tick_params(color='blue', axis='x', labelsize=10)
+        
+        # Save master_spec as .npy in same directory as image
+        if self.output_mode in ('save', 'both'):
+            category_dir = self.output_root / 'master_spectrum'
+            category_dir = category_dir / self._safe_name(dataset.region)
+            category_dir.mkdir(parents=True, exist_ok=True)
+            master_img = np.empty((len(master_wavelength), 3))
+            master_img[:, 0] = master_wavelength
+            master_img[:, 1] = master_spec_spl(master_wavelength)
+            master_img[:, 2] = master_weight
+            np.save(category_dir / 'master_img.npy', master_img)
         
         self._emit_figure(fig, category='master_spectrum', filename='master_stellar_spectrum', region=dataset.region)
 

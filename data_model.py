@@ -71,19 +71,21 @@ class Data:
 
 
 class Dataset:
-    def __init__(self, items: list[Data], region: str, nb_files: int, products: dict):
+    def __init__(self, items: list[Data], region: str, nb_files: int, products: dict, stellar_model_path:str):
         """ Dataset container for the AU Mic pipeline.
 
         Attributes:
-            items: list[Data]    -- the list of Data objects
-            region: str          -- the region of interest (ex: A12)
-            nb_files: int        -- the number of files in the dataset
-            products: dict       -- the dictionary of derived products (Shared outputs built from multiple files (stacked spectra, master spectrum, CCF maps).)
+            items: list[Data]       -- the list of Data objects
+            region: str             -- the region of interest (ex: A12)
+            nb_files: int           -- the number of files in the dataset
+            products: dict          -- the dictionary of derived products (Shared outputs built from multiple files (stacked spectra, master spectrum, CCF maps).)
+            stellar_model_path: str -- the path of the synthetic stellar model 
         """
         self.items = items
         self.region = region
         self.nb_files = nb_files
         self.products = products
+        self.stellar_model_path = stellar_model_path
 
     def build_step1_2_dataset(self):
         step1_2_items = []
@@ -105,4 +107,4 @@ class Dataset:
             new_data.derived['parent_file_id'] = src.file_id
             step1_2_items.append(new_data)
 
-        return Dataset(items=step1_2_items, region=self.region, nb_files=len(step1_2_items), products={})
+        return Dataset(items=step1_2_items, region=self.region, nb_files=len(step1_2_items), products={}, stellar_model_path=self.stellar_model_path)
