@@ -100,8 +100,6 @@ class Plotter:
         if self.output_mode == 'off':
             return
         values = data.derived.get('clipped_values', data.derived.get('clean_values', data.raw_values))
-        if len(values) < 60:
-            return
         ind_w = np.argsort(values['w'])
         wdata = values[ind_w]
         fig, ax = plt.subplots()
@@ -159,7 +157,6 @@ class Plotter:
         # Create regular grid for evaluation
         r_min, r_max = np.min(psf_2d_r), np.max(psf_2d_r)
         w_min, w_max = np.min(psf_2d_w), np.max(psf_2d_w)
-        
         nr, nw = 100, 100
         r_grid = np.linspace(r_min, r_max, nr)
         w_grid = np.linspace(w_min, w_max, nw)
@@ -169,22 +166,18 @@ class Plotter:
         Z = psf_2d_spl(R, W, grid=False)
         
         # Clip to physical bounds [0, 0.35]
-        Z_clipped = np.clip(Z, 0, 0.35)
+        #Z_clipped = np.clip(Z, 0, 0.35)
         
         # Create heatmap
         fig, ax = plt.subplots()
         plt.title('2D PSF (r, w)' if title is None else title)
-        plt.xlabel('r - distance from slit centre')
+        plt.xlabel('r - distance from star centre')
         plt.ylabel('Wavelength [nm]')
-        
-        # Plot heatmap with fixed scale
-        bar = ax.pcolormesh(r_grid, w_grid, Z_clipped, shading='auto', cmap='viridis', vmin=0, vmax=0.35)
+        bar = ax.pcolormesh(r_grid, w_grid, Z, shading='auto', cmap='viridis', vmin=0, vmax=0.35)
         fig.colorbar(bar, ax=ax, label='Normalized PSF')
-        
         ax.tick_params(color='blue', axis='x', labelsize=10)
         fig.set_figheight(7)
         fig.set_figwidth(10)
-        
         file_title = '2D PSF' if title is None else title
         self._emit_figure(fig, category='psf_2d', filename=file_title, region=data.region)
 
@@ -204,7 +197,6 @@ class Plotter:
                 continue
 
             w_slice = float(np.median(psf_w))
-            #w_slice_2 = 1694.0
             r_min, r_max = float(np.min(psf_r)), float(np.max(psf_r))
             r_grid = np.linspace(r_min, r_max, 400)
 
@@ -216,9 +208,7 @@ class Plotter:
 
             # 2D spline slice at w_slice
             z_grid = np.asarray(psf_2d_spl(r_grid, w_slice), dtype=float)
-            #z_prim_grid = np.asarray(psf_2d_spl(r_grid, w_slice_2), dtype=float)
             ax.plot(r_grid, z_grid, '-', color='green', lw=1.5, label='2D PSF slice w=w_slice')
-            #ax.plot(r_grid, z_prim_grid, '--', color='orange', lw=1.5, label='2D PSF slice w=1694nm')
 
             # Data points near the selected wavelength
             tol = max(1e-6, (np.nanmax(psf_w) - np.nanmin(psf_w)) / 50.0) # 1/50 of the total wavelength range
@@ -245,13 +235,11 @@ class Plotter:
             fig.set_figwidth(10)
             self._emit_figure(fig, category='psf', filename=plot_title, region=data.region)
 
-
     def plot_psf_dataset(self, dataset: Dataset, stage: str = ''):
         if self.output_mode == 'off':
             return
         stage = stage.lower()
-        
-        # Handle 2D PSF case
+        # 2D PSF case
         if '2d' in stage:
             for data in dataset.items:
                 psf_2d_spl = data.derived.get('psf_2d_spl')
@@ -260,7 +248,7 @@ class Plotter:
                 self.plot_psf_2d(data, psf_2d_spl, title=f"2D PSF - {data.file_id}")
             return
         
-        # Handle 1D PSF cases
+        # 1D PSF cases
         if stage == 'rough':
             psf_spl_key = 'psf_rough_spl'
             spec_spl_key = 'rss_interp'
@@ -379,7 +367,6 @@ class Plotter:
         group_spec = dataset.products.get('group_spec')
         group_psf = dataset.products.get('group_psf')
         one_frame_spec = dataset.products.get('one_frame_spec')
-        w_shift = dataset.products.get('w_shift')
         if w is None or group_spec is None or one_frame_spec is None:
             return
 
@@ -494,13 +481,14 @@ class Plotter:
         """
         Plot the Master Stellar Spectrum from the fitted spline.
         """
-        master_wavelength = dataset.products['master_wavelength']
+        master_wavelength = dataset.products['master_wavelength_BRF']
         master_spec_spl = dataset.products['master_spec_spl']
         master_weight = dataset.products['master_weight']
         #master_spec = dataset.products['master_spec']
         
         # Evaluate spline over wavelength range [2800:-3500] indices
         w_eval = np.linspace(master_wavelength[2800],  master_wavelength[-3500], 3000)
+        #w_eval = dataset.products['cut_wavelength']
         flux_eval = master_spec_spl(w_eval)
         
         fig, ax = plt.subplots(figsize=(10, 5))

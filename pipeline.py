@@ -42,7 +42,7 @@ def run_step1_2(dataset, spec_process, plotter):
     plotter.plot_spectrum_dataset(dataset)
     plotter.plot_psf_dataset(dataset, 'final 1D')
     
-    spec_process.psf_true_2d(dataset)
+    spec_process.psf_2d(dataset)
     spec_process.refine_spectrum_psf_2d(dataset, dr=5.0)
     plotter.plot_psf_dataset(dataset, '2D')
     plotter.plot_slice_psf_2d(dataset)
@@ -80,20 +80,20 @@ def main(): #plot all spectra related to a region
     plotter = Plotter('save',plot_root) #output_mode can be 'save', 'show', 'both' or 'off' (default is 'show')
     spec_process = SpectroscopyProcessing()
 
-    file_manager_A = FileManager(root,region='A12',nb_files=2, stellar_model_path=stellar_model_path)
-    file_manager_B = FileManager(root,region='B12',nb_files=10, stellar_model_path=stellar_model_path)
+    file_manager_A = FileManager(root,region='A12',nb_files=39, stellar_model_path=stellar_model_path)
+    file_manager_B = FileManager(root,region='B12',nb_files=39, stellar_model_path=stellar_model_path)
 
     dataset_A = file_manager_A.load_data()
-    #dataset_B = file_manager_B.load_data()
+    dataset_B = file_manager_B.load_data()
     run_step1(dataset_A, spec_process, plotter)
-    #run_step1(dataset_B, spec_process, plotter)
+    run_step1(dataset_B, spec_process, plotter)
 
     dataset_step1_2_A = dataset_A.build_step1_2_dataset()
-    #dataset_step1_2_B = dataset_B.build_step1_2_dataset()
+    dataset_step1_2_B = dataset_B.build_step1_2_dataset()
     run_step1_2(dataset_step1_2_A, spec_process, plotter)
-    #run_step1_2(dataset_step1_2_B, spec_process, plotter)
+    run_step1_2(dataset_step1_2_B, spec_process, plotter)
 
-    #run_step4(dataset_step1_2_A, dataset_step1_2_B, spec_process, plotter)
+    run_step4(dataset_step1_2_A, dataset_step1_2_B, spec_process, plotter)
 
 if __name__ == "__main__":
     main()
