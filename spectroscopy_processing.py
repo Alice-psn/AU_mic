@@ -217,9 +217,14 @@ class SpectroscopyProcessing:
             weight = (1.0 / err_psf) ** 2
         weight[~np.isfinite(weight)] = 0.0
 
-        min_slit = int(np.min(rdata['r']))
-        max_slit = int(np.max(rdata['r']))
-        knots = np.arange(min_slit, max_slit, 1.0)
+        # Use quantile-based knots to ensure Schoenberg-Whitney conditions are satisfied
+        r_min, r_max = np.min(rdata['r']), np.max(rdata['r'])
+        #n_knots = 50
+        #knots = np.quantile(rdata['r'], np.linspace(0.1, 0.9, n_knots))
+        knots = np.arange(r_min,r_max,1.0) # old code
+        # Remove any knots exactly at or very close to data boundaries
+        knots = knots[(knots > r_min + 0.1) & (knots < r_max - 0.1)]
+        
         psf_spl = sp.interpolate.LSQUnivariateSpline(rdata['r'], psf, knots, weight)
         return psf_spl, psf, err_psf
    
@@ -409,6 +414,7 @@ class SpectroscopyProcessing:
 
             r = np.asarray(data_sorted['r'], dtype=float)
             w = np.asarray(data_sorted['w'], dtype=float)
+            f = np.asarray(spec_spl(data_sorted['w']), dtype=float) # divide by median TO DO
             psf_raw = np.asarray(psf, dtype=float)  # Raw normalized PSF values
             weight_raw = np.asarray(weight, dtype=float)
 
@@ -816,7 +822,7 @@ class SpectroscopyProcessing:
             f = f/np.median(f)
             first_data = dataset.items[0]
             min_w, max_w = np.min(first_data.raw_values['w']), np.max(first_data.raw_values['w'])
-            mask = (w >= min_w) & (w <= max_w)
+            mask = (w >= min_w-0.1) & (w <= max_w+0.1) #get some points outside for ccf shift 
             w,f = w[mask], f[mask]
             knots = np.arange(w[30], w[-30], 0.015)
             spec_spl = sp.interpolate.LSQUnivariateSpline(w,f, knots)
@@ -850,7 +856,7 @@ class SpectroscopyProcessing:
             psf_spl = data.derived.get('psf_spl')
             if residual_data_BRF is None or (psf_2d_spl is None and psf_spl is None):
                 continue
-
+            
             values = residual_data_BRF.raw_values
             rmin = float(np.min(values['r']))
             rmax = float(np.max(values['r']))
@@ -863,9 +869,7 @@ class SpectroscopyProcessing:
             # shift_values = values.copy()
             # shift_values['w'] = self.doppler_shift(values['w'], -barycorr_kms)
 
-            w = np.linspace(np.min(values['w']) * (1.0 + delta), np.max(values['w']) * (1.0 - delta), 3000) #safe grid for CCF
-            #print(np.min(values['w']),np.max(values['w']))
-            #print(np.min(values['w']) * (1.0 + delta), np.max(values['w']) * (1.0 - delta))
+            w = np.linspace(np.min(values['w']) * (1.0 + delta), np.max(values['w']) * (1.0 - delta), 3000) #safe grid for CCF, CHANGE FOR LARGER
             w_with_cut = np.asarray(w, dtype=float).copy()
 
             if 'model' in star_spec and dataset.stellar_model_path is not None :
@@ -876,14 +880,11 @@ class SpectroscopyProcessing:
                     w_with_cut = w_with_cut[np.abs(w_with_cut - w_peak) > delta*np.max(w)+delta_w] # mask to cover tellurics move due to cross-correlation shift of master spectrum
 
             for i, r_pos in enumerate(r_position):
-                spec_clump_spl = self._clump_spectrum(values, r_pos, dr) # residual spectrum at given r_pos position
+                spec_clump_spl = self._clump_spectrum(values, r_pos, dr) # residual spectrum at given r_pos position, extrapolation at edges, to use on restricted range
                 # Plot residuals spectrum
-                """if i==30 :
-                    plt.plot(values['w'], spec_clump_spl(values['w']),'.')
-                    plt.title(f'Residuals spectrum around r={r_pos}')
-                    plt.show()"""
-                if spec_clump_spl is None:
-                    continue
+                """plt.plot(w_with_cut, spec_clump_spl(w_with_cut),'r.')
+                plt.title(f'Residuals spectrum around r={r_pos}')
+                plt.show()"""
                 # Shift mask back to ERF
                 #w_with_cut = self.doppler_shift(w_with_cut, barycorr_kms)
                 residuals_with_cut = spec_clump_spl(w_with_cut)
@@ -920,6 +921,9 @@ class SpectroscopyProcessing:
         return dataset
 
     def _clump_spectrum(self, residual_values: np.ndarray, r_pos: float, dr: float):
+        """
+        Build spline of the residual spectrum at a position r_pos
+        """
         ind = np.argsort(residual_values['w'])
         wdata_BRF = residual_values[ind]
         sel_dr = np.abs(wdata_BRF['r'] - r_pos) < dr
@@ -933,11 +937,12 @@ class SpectroscopyProcessing:
         with np.errstate(divide='ignore', invalid='ignore'):
             weight = (1.0 / data['e']) ** 2
         weight[~np.isfinite(weight)] = 0.0
-
-        try:
-            return sp.interpolate.LSQUnivariateSpline(data['w'], data['f'], knots, weight)
-        except Exception:
-            return None
+        spec_clump_spl = sp.interpolate.LSQUnivariateSpline(data['w'], data['f'], knots, weight)
+        """plt.plot(data['w'], spec_clump_spl(data['w']),'r')
+        plt.plot(data['w'],data['f'],'b.')
+        plt.title(f'Residuals spectrum around r={r_pos}')
+        plt.show()"""
+        return spec_clump_spl
         
     @staticmethod
     def _step4_night_from_epoch(epoch_index: int | None):

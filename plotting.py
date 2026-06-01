@@ -154,15 +154,13 @@ class Plotter:
         if psf_2d_r is None or psf_2d_w is None or len(psf_2d_r) == 0:
             return
         
-        # Create regular grid for evaluation
+        # Regular grid for evaluation
         r_min, r_max = np.min(psf_2d_r), np.max(psf_2d_r)
         w_min, w_max = np.min(psf_2d_w), np.max(psf_2d_w)
         nr, nw = 100, 100
         r_grid = np.linspace(r_min, r_max, nr)
         w_grid = np.linspace(w_min, w_max, nw)
         R, W = np.meshgrid(r_grid, w_grid)
-        
-        # Evaluate spline on grid
         Z = psf_2d_spl(R, W, grid=False)
         
         # Clip to physical bounds [0, 0.35]
