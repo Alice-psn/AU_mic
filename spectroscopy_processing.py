@@ -362,21 +362,30 @@ class SpectroscopyProcessing:
         for data in dataset.items:
             values = data.derived.get('clipped_values', data.raw_values)
             psf_2d_spl = data.derived.get('psf_2d_spl')
+            spec_spl = data.derived.get('spec_spl')
+            r = data.derived['psf_2d_r']
+            w = data.derived['psf_2d_w']
+            f = data.derived['psf_2d_f']
             if psf_2d_spl is None:
                 continue
 
+            #f = spec_spl(values['w'][100:-100])
             # Find r_star using 2D PSF at all wavelengths
-            psf_2d_vals = np.asarray(psf_2d_spl(values['r'], values['w'], grid=False), dtype=float)
+            #psf_2d_vals = np.asarray(psf_2d_spl(values['r'], values['w'], grid=False), dtype=float)
+            psf_2d_vals = np.asarray(psf_2d_spl(r, f, grid=False), dtype=float)
             ind_max = np.argmax(psf_2d_vals)
-            r_star = values['r'][ind_max] # almost zero
+            r_star = r[ind_max] # almost zero
+            print('r_star',r_star)
 
-            # Single-pass spectrum fit using 2D PSF
+            # Single spectrum fit using 2D PSF
             ind = np.argsort(values['w'])
-            wdata = values[ind]
+            wdata = values[ind] #[100:-100]
             ind_dr = np.abs(wdata['r'] - r_star) < dr # around the star
             data_sel = wdata[ind_dr]
 
-            denom = np.asarray(psf_2d_spl(data_sel['r'], data_sel['w'], grid=False), dtype=float)
+            #denom = np.asarray(psf_2d_spl(data_sel['r'], data_sel['w'], grid=False), dtype=float)
+            f = spec_spl(data_sel['w'])
+            denom = np.asarray(psf_2d_spl(data_sel['r'], f/np.median(f), grid=False), dtype=float)
             spec = data_sel['f'] / denom
             err_spec = data_sel['e'] / denom
             with np.errstate(divide='ignore', invalid='ignore'):
@@ -401,9 +410,9 @@ class SpectroscopyProcessing:
             if values is None or spec_spl is None or psf_r_spl is None or len(values) == 0:
                 continue
 
-            # Build normalized PSF samples on raw points
+            # Build normalized PSF samples on raw points (except the edges)
             ind = np.argsort(values['w'])
-            data_sorted = values[ind]
+            data_sorted = values[ind] #[100:-100]
             denom = spec_spl(data_sorted['w'])
 
             psf = data_sorted['f'] / denom
@@ -414,29 +423,38 @@ class SpectroscopyProcessing:
 
             r = np.asarray(data_sorted['r'], dtype=float)
             w = np.asarray(data_sorted['w'], dtype=float)
-            f = np.asarray(spec_spl(data_sorted['w']), dtype=float) # divide by median TO DO
+            f = np.asarray(spec_spl(data_sorted['w']), dtype=float)
+            f = f/np.median(f)
+            """plt.plot(w,f,'.')
+            plt.show()"""
             psf_raw = np.asarray(psf, dtype=float)  # Raw normalized PSF values
             weight_raw = np.asarray(weight, dtype=float)
 
             # Fixed knot counts
             n_knots_r = 60
             n_knots_w = 2
+            n_knots_f = 2
             r_unique = np.unique(r)
             w_unique = np.unique(w)
+            f_unique = np.unique(f)
             r0 = r[np.argmax(psf_raw)]
             u = np.arcsinh((r_unique - r0) / 3.0) # more knots towards the centre
             r_knots = r0 + 3.0 * np.sinh(np.linspace(u[1], u[-2], n_knots_r))
             w_knots = np.linspace(w_unique[100],w_unique[-100],n_knots_w)
+            #f_knots = np.linspace(f_unique[100],f_unique[-100],n_knots_f)
+            f_knots = np.array([0.7, 1.2])
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
-                psf_2d_spl = sp.interpolate.LSQBivariateSpline(r, w, psf_raw, r_knots, w_knots, w=weight_raw)
-
+                # f or w change here
+                #psf_2d_spl = sp.interpolate.LSQBivariateSpline(r, w, psf_raw, r_knots, w_knots, w=weight_raw)
+                psf_2d_spl = sp.interpolate.LSQBivariateSpline(r, f, psf_raw, r_knots, f_knots, w=weight_raw)
             data.derived['psf_2d_spl'] = psf_2d_spl
             data.derived['r_knots'] = r_knots
             data.derived['psf_2d'] = psf_raw  # Raw normalized PSF
             data.derived['err_psf_2d'] = 1.0 / np.sqrt(weight_raw + 1e-12)
             data.derived['psf_2d_r'] = r
             data.derived['psf_2d_w'] = w
+            data.derived['psf_2d_f'] = f
 
         return dataset
 
@@ -723,7 +741,8 @@ class SpectroscopyProcessing:
             ind_r = np.argsort(values['r'])
             rdata = values[ind_r]
             if psf_2d_spl is not None:
-                psf_eval = np.asarray(psf_2d_spl(rdata['r'], rdata['w'], grid=False), dtype=float)
+                #psf_eval = np.asarray(psf_2d_spl(rdata['r'], rdata['w'], grid=False), dtype=float)
+                psf_eval = np.asarray(psf_2d_spl(rdata['r'], spec_spl(rdata['w'])/np.median(spec_spl(rdata['w'])), grid=False), dtype=float)
             else:
                 psf_eval = np.asarray(psf_spl(rdata['r']), dtype=float)
             model_flux = spec_spl(rdata['w']) * psf_eval

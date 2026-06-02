@@ -121,7 +121,10 @@ class Plotter:
             spec_spl = data.derived.get('spec_spl')
             if spec_spl is None:
                 continue
-            self.plot_spectrum(data, spec_spl, title=f"Final Spectrum - {data.file_id}")
+            if data.derived.get('psf_2d_spl') is not None :
+                self.plot_spectrum(data, spec_spl, title=f"Final Spectrum after 2D - {data.file_id}")
+            else :
+                self.plot_spectrum(data, spec_spl, title=f"Final Spectrum - {data.file_id}")
     
     """
     ************ PSF *************
@@ -150,28 +153,33 @@ class Plotter:
         
         psf_2d_r = data.derived.get('psf_2d_r')
         psf_2d_w = data.derived.get('psf_2d_w')
+        psf_2d_f = data.derived.get('psf_2d_f')
         
-        if psf_2d_r is None or psf_2d_w is None or len(psf_2d_r) == 0:
+        if psf_2d_r is None or len(psf_2d_r) == 0:
             return
         
         # Regular grid for evaluation
         r_min, r_max = np.min(psf_2d_r), np.max(psf_2d_r)
         w_min, w_max = np.min(psf_2d_w), np.max(psf_2d_w)
-        nr, nw = 100, 100
+        f_min, f_max = np.min(psf_2d_f), np.max(psf_2d_f)
+        nr, nw, nf = 100, 100, 100
         r_grid = np.linspace(r_min, r_max, nr)
         w_grid = np.linspace(w_min, w_max, nw)
-        R, W = np.meshgrid(r_grid, w_grid)
-        Z = psf_2d_spl(R, W, grid=False)
+        f_grid = np.linspace(f_min, f_max, nf)
+        # f or w change after here
+        R, F = np.meshgrid(r_grid, f_grid)
+        Z = psf_2d_spl(R, F, grid=False)
         
         # Clip to physical bounds [0, 0.35]
         #Z_clipped = np.clip(Z, 0, 0.35)
         
         # Create heatmap
         fig, ax = plt.subplots()
-        plt.title('2D PSF (r, w)' if title is None else title)
+        plt.title('2D PSF (r, f)' if title is None else title)
         plt.xlabel('r - distance from star centre')
-        plt.ylabel('Wavelength [nm]')
-        bar = ax.pcolormesh(r_grid, w_grid, Z, shading='auto', cmap='viridis', vmin=0, vmax=0.35)
+        #plt.ylabel('Wavelength [nm]')
+        plt.ylabel('Normalized flux')
+        bar = ax.pcolormesh(r_grid, f_grid, Z, shading='auto', cmap='viridis', vmin=0, vmax=0.35)
         fig.colorbar(bar, ax=ax, label='Normalized PSF')
         ax.tick_params(color='blue', axis='x', labelsize=10)
         fig.set_figheight(7)
@@ -188,29 +196,34 @@ class Plotter:
             if psf_2d_spl is None:
                 continue
 
-            psf_w = data.derived.get('psf_2d_w') # data sorted by w
-            psf_r = data.derived.get('psf_2d_r') # data sorted by r
+            psf_w = data.derived.get('psf_2d_w') # data['w'] sorted by w
+            psf_r = data.derived.get('psf_2d_r') # data['r'] sorted by w
+            psf_f = data.derived.get('psf_2d_f') # data['f'] sorted by w
             psf_vals = data.derived.get('psf_2d')
-            if psf_r is None or psf_w is None or psf_vals is None:
+            if psf_r is None or psf_vals is None:
                 continue
 
             w_slice = float(np.median(psf_w))
+            f_slice = 1.0
             r_min, r_max = float(np.min(psf_r)), float(np.max(psf_r))
             r_grid = np.linspace(r_min, r_max, 400)
 
             fig, ax = plt.subplots()
             plot_title = f"PSF slice - {data.file_id}"
             plt.title(plot_title)
-            plt.xlabel('r - distance from slit centre')
+            plt.xlabel('r - distance from star centre')
             plt.ylabel('Normalized PSF')
 
-            # 2D spline slice at w_slice
-            z_grid = np.asarray(psf_2d_spl(r_grid, w_slice), dtype=float)
-            ax.plot(r_grid, z_grid, '-', color='green', lw=1.5, label='2D PSF slice w=w_slice')
+            # 2D spline slice at w_slice/f_slice
+            #z_grid = np.asarray(psf_2d_spl(r_grid, w_slice), dtype=float)
+            z_grid = np.asarray(psf_2d_spl(r_grid, f_slice), dtype=float)
+            ax.plot(r_grid, z_grid, '-', color='green', lw=1.5, label='2D PSF slice f=f_slice')
 
-            # Data points near the selected wavelength
+            # Data points near the selected wavelength/flux
             tol = max(1e-6, (np.nanmax(psf_w) - np.nanmin(psf_w)) / 50.0) # 1/50 of the total wavelength range
             sel = np.isfinite(psf_w) & (np.abs(psf_w - w_slice) <= tol)
+            tol = max(1e-6, (np.nanmax(psf_f) - np.nanmin(psf_f)) / 50.0) # 1/50 of the total flux range
+            sel = np.isfinite(psf_f) & (np.abs(psf_f - f_slice) <= tol)
             if np.any(sel):
                 ax.plot(np.asarray(psf_r)[sel], np.asarray(psf_vals)[sel], '.', color='black', ms=3, label='data points')
 
@@ -224,7 +237,8 @@ class Plotter:
             r_knots = data.derived.get('r_knots')
             if r_knots is not None and len(r_knots) > 0:
                 r_knots = np.asarray(r_knots, dtype=float)
-                k_vals = np.asarray(psf_2d_spl(r_knots, w_slice), dtype=float)
+                #k_vals = np.asarray(psf_2d_spl(r_knots, w_slice), dtype=float)
+                k_vals = np.asarray(psf_2d_spl(r_knots, f_slice), dtype=float)
                 ax.plot(r_knots, k_vals, 'x', color='blue', ms=6, label='knots')
 
             ax.legend(loc='best')
