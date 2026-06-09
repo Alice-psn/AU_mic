@@ -146,9 +146,10 @@ def ccf(wavelength: np.ndarray, master_spec_spl: np.ndarray, model_spec: np.ndar
     return ccf_array,vel
 
 if __name__ == '__main__':
-    region = 'A22'
+    region = 'A12'
     file_path_model = 'C:/Users/alice/Documents/Stage Suède/spec3700_45.npy'
     file_path_master = f'C:/Users/alice/Documents/Stage Suède/plots/master_spectrum/{region}/master_img.npy'
+    file_path_epoch = f'C:/Users/alice/Documents/Stage Suède/plots/spectrum/{region}/000_epoch_spectrum.npy'
     file_manager = FileManager('C:/Users/alice/Documents/Stage Suède/data/', region=region, nb_files=1)
 
     dataset = file_manager.load_data()
@@ -159,6 +160,7 @@ if __name__ == '__main__':
     w_telluric = []
     model_spec = np.load(file_path_model, allow_pickle=True) # 2 columns (wavelength, flux)
     master_spec = np.load(file_path_master, allow_pickle=True) # 3 columns (wavelength, flux, weight)
+    epoch_spec = np.load(file_path_master, allow_pickle=True) # 3 columns (wavelength, flux, weight)
 
     #plot_whole_spectrum(file_path_master)
     #plot_spectrum(file_path_model, min_w, max_w)

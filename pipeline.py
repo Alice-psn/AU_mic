@@ -39,11 +39,10 @@ def run_step1_2(dataset, spec_process, plotter):
     spec_process.psf_rough(dataset)
     plotter.plot_psf_dataset(dataset, 'rough')
     spec_process.refine_spectrum_psf(dataset, m_iter=3, dr=5.0)
-    plotter.plot_spectrum_dataset(dataset)
+    plotter.plot_spectrum_dataset(dataset) # is erased by the spectrum plot after 2D PSF
     plotter.plot_psf_dataset(dataset, 'final 1D')
     
-    spec_process.psf_2d(dataset)
-    spec_process.refine_spectrum_psf_2d(dataset, dr=5.0)
+    spec_process.refine_spectrum_psf_2d(dataset, 'w', dr=5.0)
     plotter.plot_psf_dataset(dataset, '2D')
     plotter.plot_slice_psf_2d(dataset)
     plotter.plot_spectrum_dataset(dataset)
@@ -64,7 +63,7 @@ def run_step1_2(dataset, spec_process, plotter):
     spec_process.final_residuals(dataset)
     plotter.plot_residuals_dataset(dataset,'Final Residuals')
 
-    spec_process.ccf_image_separation_velocity(dataset,'model')
+    spec_process.ccf_image_separation_velocity(dataset,'master')
     plotter.plot_velocity_separation_image(dataset)
 
 def run_step4(dataset_A,dataset_B,spec_process,plotter):
@@ -81,7 +80,7 @@ def main():
     plotter = Plotter('save',plot_root) #output_mode can be 'save', 'show', 'both' or 'off' (default is 'show')
     spec_process = SpectroscopyProcessing()
 
-    file_manager_A = FileManager(root,region='A33',nb_files=2, stellar_model_path=stellar_model_path)
+    file_manager_A = FileManager(root,region='A12',nb_files=2, stellar_model_path=stellar_model_path)
     #file_manager_B = FileManager(root,region='B13',nb_files=39, stellar_model_path=stellar_model_path)
 
     dataset_A = file_manager_A.load_data()

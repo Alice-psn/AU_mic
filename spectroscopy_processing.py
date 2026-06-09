@@ -290,8 +290,8 @@ class SpectroscopyProcessing:
     """
     ************ Final spectra and PSF *************
     """
-
-    def fit_psf_from_values(self, values, spec_fun):
+    @staticmethod
+    def fit_psf_from_values(values, spec_fun):
         """
         Derive PSF from spectrum 
         """
@@ -308,8 +308,9 @@ class SpectroscopyProcessing:
         knots = np.arange(data_sorted['r'][1], data_sorted['r'][-1], 0.5)
         psf_spl = sp.interpolate.LSQUnivariateSpline(data_sorted['r'], psf, knots, weight)
         return psf_spl, psf, err_psf
-
-    def fit_spec(self, values, psf_fun, r_star: float, dr: float=15.0, spec_resolution: float=0.015):
+    
+    @staticmethod
+    def fit_spec(values, psf_fun, r_star: float, dr: float=15.0, spec_resolution: float=0.015):
         """
         Derive spectrum from PSF, considering only data around the centre of the star (dr distance)
         """
@@ -330,6 +331,65 @@ class SpectroscopyProcessing:
         spec_spl = sp.interpolate.LSQUnivariateSpline(data['w'], spec, knots, weight)
         return spec_spl, spec, err_spec, weight, wavelength
 
+    def fit_spec_2d(self, data, dr: float=15.0, spec_resolution: float=0.015):
+        """
+        Derive spectrum from 2D PSF, considering only data around the centre of the star (dr distance)
+        """
+        psf_2d_spl = data.derived.get('psf_2d_spl')
+        spec_spl = data.derived.get('spec_spl')
+        r_eval, w_eval, f_eval = data.derived['psf_2d_r'], data.derived['psf_2d_w'], data.derived['psf_2d_f']
+        second_arg = data.derived['second_arg']
+
+        # Find r_star using 2D PSF at all wavelengths
+        if 'f' in second_arg :
+            psf_2d_vals = np.asarray(psf_2d_spl(r_eval, f_eval, grid=False), dtype=float)
+        else :
+            psf_2d_vals = np.asarray(psf_2d_spl(r_eval, w_eval, grid=False), dtype=float)
+        ind_max = np.argmax(psf_2d_vals)
+        r_star = r_eval[ind_max] # almost zero
+        #print('r_star',r_star)
+
+        values = data.raw_values.copy()
+        ind = np.argsort(values['w'])
+        wdata = values[ind] #[100:-100] if 'f'
+        ind_dr = np.abs(wdata['r'] - r_star) < dr
+        wdata = wdata[ind_dr]
+
+        if 'f' in second_arg :
+            spec_spl = data.derived['spec_spl']
+            f = spec_spl(np.asarray(wdata['w']))
+            f = f/np.median(f)
+            if np.max(f)>np.max(f_eval):
+                print(f'Warning: psf spline is evaluated outside its training values, maximum should be < {np.max(f_eval)} but is = {np.max(f)}')
+            denom = psf_2d_spl(wdata['r'], f, grid=False)
+        else :
+            denom = psf_2d_spl(wdata['r'], wdata['w'], grid=False)
+        spec = wdata['f'] / denom
+        err_spec = wdata['e'] / denom
+        with np.errstate(divide='ignore', invalid='ignore'):
+            weight = (denom / err_spec) ** 2
+        weight[~np.isfinite(weight)] = 0.0
+
+        knots = np.arange(wdata['w'][10], wdata['w'][-10], spec_resolution)
+        wavelength = wdata['w']
+        spec_spl = sp.interpolate.LSQUnivariateSpline(wdata['w'], spec, knots, weight)
+
+        data.derived['spec_spl'] = spec_spl
+        data.derived['spec'] = np.asarray(spec)
+        data.derived['err_spec'] = np.asarray(err_spec)
+        data.derived['weight'] = np.asarray(weight)
+        data.derived['wavelength'] = np.asarray(wavelength)
+
+
+
+        ind = np.argsort(values['w'])
+        temp_data = values[ind] #[100:-100]
+        f = spec_spl(np.asarray(temp_data['w']))
+        f = f/np.median(f)
+        #print('fmax after spec',np.max(f))
+
+        return
+
     def refine_spectrum_psf(self, dataset: Dataset, m_iter: int = 3, dr: float = 15.0):
         for data in dataset.items:
             clipped_values = data.derived.get('clipped_values')
@@ -338,14 +398,13 @@ class SpectroscopyProcessing:
             # Determine r_star after sigma-clipped selection.
             ind_max = np.argmax(psf_rough_spl(clipped_values['r']))
             r_star = clipped_values['r'][ind_max]
-            #data.derived['r_star'] = float(r_star)
 
             rdata = clipped_values[np.argsort(clipped_values['r'])]
             psf_spl = psf_rough_spl
 
             for _ in range(m_iter):
-                spec_spl, spec, err_spec, weight, wavelength = self.fit_spec(clipped_values, psf_spl, r_star, dr=dr)
-                psf_spl, psf, err_psf = self.fit_psf_from_values(rdata, spec_spl)
+                spec_spl, spec, err_spec, weight, wavelength = SpectroscopyProcessing.fit_spec(clipped_values, psf_spl, r_star, dr=dr)
+                psf_spl, psf, err_psf = SpectroscopyProcessing.fit_psf_from_values(rdata, spec_spl)
 
             data.derived['spec_spl'] = spec_spl
             data.derived['spec'] = np.asarray(spec)
@@ -357,106 +416,66 @@ class SpectroscopyProcessing:
             data.derived['err_psf'] = np.asarray(err_psf)
         return dataset
 
-    def refine_spectrum_psf_2d(self, dataset: Dataset, dr: float = 15.0):
-        """Spectrum fit using 2D PSF (no iteration for the moment)"""
+    def refine_spectrum_psf_2d(self, dataset: Dataset, second_arg: str, dr: float = 15.0):
+        """Spectrum fit using 2D PSF (1 iteration for the moment)"""
         for data in dataset.items:
-            values = data.derived.get('clipped_values', data.raw_values)
-            psf_2d_spl = data.derived.get('psf_2d_spl')
-            spec_spl = data.derived.get('spec_spl')
-            r = data.derived['psf_2d_r']
-            w = data.derived['psf_2d_w']
-            f = data.derived['psf_2d_f']
-            if psf_2d_spl is None:
-                continue
+            self.fit_psf_2d(data,second_arg)
+            self.fit_spec_2d(data, dr)
+            self.fit_psf_2d(data,second_arg)
+        return
 
-            #f = spec_spl(values['w'][100:-100])
-            # Find r_star using 2D PSF at all wavelengths
-            #psf_2d_vals = np.asarray(psf_2d_spl(values['r'], values['w'], grid=False), dtype=float)
-            psf_2d_vals = np.asarray(psf_2d_spl(r, f, grid=False), dtype=float)
-            ind_max = np.argmax(psf_2d_vals)
-            r_star = r[ind_max] # almost zero
-            print('r_star',r_star)
+    def fit_psf_2d(self, data, second_arg:str):
+        """
+        Compute 2D PSF as function of separation r and of second_arg ('f' for flux or 'w' for wavelength dependance).
+        Flux dependance is actually spectrum dependance and is normalized by its median
+        """
+        values = data.raw_values.copy()
+        spec_spl = data.derived.get('spec_spl')
 
-            # Single spectrum fit using 2D PSF
-            ind = np.argsort(values['w'])
-            wdata = values[ind] #[100:-100]
-            ind_dr = np.abs(wdata['r'] - r_star) < dr # around the star
-            data_sel = wdata[ind_dr]
+        # Build normalized PSF samples on raw points (except edges)
+        ind = np.argsort(values['w'])
+        data_sorted = values[ind] # [100:-100] if 'f'
+        denom = spec_spl(data_sorted['w'])
 
-            #denom = np.asarray(psf_2d_spl(data_sel['r'], data_sel['w'], grid=False), dtype=float)
-            f = spec_spl(data_sel['w'])
-            denom = np.asarray(psf_2d_spl(data_sel['r'], f/np.median(f), grid=False), dtype=float)
-            spec = data_sel['f'] / denom
-            err_spec = data_sel['e'] / denom
-            with np.errstate(divide='ignore', invalid='ignore'):
-                weight = (denom / err_spec) ** 2
-            weight[~np.isfinite(weight)] = 0.0
+        psf = data_sorted['f'] / denom
+        err_psf = data_sorted['e'] / denom
+        with np.errstate(divide='ignore', invalid='ignore'):
+            weight = (1.0 / err_psf) ** 2
+        weight[~np.isfinite(weight)] = 0.0
 
-            knots = np.arange(data_sel['w'][10], data_sel['w'][-10], 0.015)
-            wavelength = data_sel['w']
-            spec_spl = sp.interpolate.LSQUnivariateSpline(wavelength, spec, knots, weight)
-            data.derived['spec_spl'] = spec_spl
-            data.derived['spec'] = np.asarray(spec)
-            data.derived['err_spec'] = np.asarray(err_spec)
-            data.derived['weight'] = np.asarray(weight)
-            data.derived['wavelength'] = np.asarray(wavelength)
-        return dataset
+        r = data_sorted['r']
+        w = data_sorted['w']
+        f = spec_spl(data_sorted['w'])
+        f = f/np.median(f)
 
-    def psf_2d(self, dataset: Dataset):
-        for data in dataset.items:
-            values = data.derived.get('clipped_values', data.raw_values)
-            spec_spl = data.derived.get('spec_spl')
-            psf_r_spl = data.derived.get('psf_spl', data.derived.get('psf_rough_spl'))
-            if values is None or spec_spl is None or psf_r_spl is None or len(values) == 0:
-                continue
+        n_knots_r, n_knots_w, n_knots_f = 60, 2, 2
+        r_unique, w_unique, f_unique = np.unique(r), np.unique(w), np.unique(f)
+        r0 = r[np.argmax(psf)]
+        u = np.arcsinh((r_unique - r0) / 3.0) # more knots towards the centre
+        r_knots = r0 + 3.0 * np.sinh(np.linspace(u[1], u[-2], n_knots_r))
+        max_left = r0 - r_unique[1] if len(r_unique) > 1 else 0.0
+        max_right = r_unique[-2] - r0 if len(r_unique) > 1 else 0.0
+        #u = np.linspace(-1.0, 1.0, n_knots_r)
+        #r_knots = np.where(u < 0.0, r0 - max_left * (np.abs(u) ** 2), r0 + max_right * (np.abs(u) ** 2))
+        w_knots = np.linspace(w_unique[100],w_unique[-100],n_knots_w)
+        f_knots = np.quantile(f_unique, np.linspace(0, 1, n_knots_f+2)[1:-1])
 
-            # Build normalized PSF samples on raw points (except the edges)
-            ind = np.argsort(values['w'])
-            data_sorted = values[ind] #[100:-100]
-            denom = spec_spl(data_sorted['w'])
-
-            psf = data_sorted['f'] / denom
-            err_psf = data_sorted['e'] / denom
-            with np.errstate(divide='ignore', invalid='ignore'):
-                weight = (1.0 / err_psf) ** 2
-            weight[~np.isfinite(weight)] = 0.0
-
-            r = np.asarray(data_sorted['r'], dtype=float)
-            w = np.asarray(data_sorted['w'], dtype=float)
-            f = np.asarray(spec_spl(data_sorted['w']), dtype=float)
-            f = f/np.median(f)
-            """plt.plot(w,f,'.')
-            plt.show()"""
-            psf_raw = np.asarray(psf, dtype=float)  # Raw normalized PSF values
-            weight_raw = np.asarray(weight, dtype=float)
-
-            # Fixed knot counts
-            n_knots_r = 60
-            n_knots_w = 2
-            n_knots_f = 2
-            r_unique = np.unique(r)
-            w_unique = np.unique(w)
-            f_unique = np.unique(f)
-            r0 = r[np.argmax(psf_raw)]
-            u = np.arcsinh((r_unique - r0) / 3.0) # more knots towards the centre
-            r_knots = r0 + 3.0 * np.sinh(np.linspace(u[1], u[-2], n_knots_r))
-            w_knots = np.linspace(w_unique[100],w_unique[-100],n_knots_w)
-            #f_knots = np.linspace(f_unique[100],f_unique[-100],n_knots_f)
-            f_knots = np.array([0.7, 1.2])
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
-                # f or w change here
-                #psf_2d_spl = sp.interpolate.LSQBivariateSpline(r, w, psf_raw, r_knots, w_knots, w=weight_raw)
-                psf_2d_spl = sp.interpolate.LSQBivariateSpline(r, f, psf_raw, r_knots, f_knots, w=weight_raw)
-            data.derived['psf_2d_spl'] = psf_2d_spl
-            data.derived['r_knots'] = r_knots
-            data.derived['psf_2d'] = psf_raw  # Raw normalized PSF
-            data.derived['err_psf_2d'] = 1.0 / np.sqrt(weight_raw + 1e-12)
-            data.derived['psf_2d_r'] = r
-            data.derived['psf_2d_w'] = w
-            data.derived['psf_2d_f'] = f
-
-        return dataset
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            if 'f' in second_arg: 
+                psf_2d_spl = sp.interpolate.LSQBivariateSpline(r, f, psf, r_knots, f_knots, w=weight)
+            else :
+                psf_2d_spl = sp.interpolate.LSQBivariateSpline(r, w, psf, r_knots, w_knots, w=weight)
+            
+        data.derived['psf_2d_spl'] = psf_2d_spl
+        data.derived['r_knots'] = r_knots
+        data.derived['psf_2d'] = psf  # Raw normalized PSF
+        #data.derived['err_psf_2d'] = 1.0 / np.sqrt(weight + 1e-12)
+        data.derived['psf_2d_r'] = r
+        data.derived['psf_2d_w'] = w
+        data.derived['psf_2d_f'] = f
+        data.derived['second_arg'] = second_arg
+        return psf_2d_spl
 
     """
     ************ r correction *************
@@ -726,7 +745,7 @@ class SpectroscopyProcessing:
             spec_spl = data.derived.get('spec_spl')
             psf_2d_spl = data.derived.get('psf_2d_spl')
             psf_spl = data.derived.get('psf_spl')
-            r_corrected_values = data.raw_values
+            r_corrected_values = data.raw_values.copy()
 
             if spec_spl is None or (psf_2d_spl is None and psf_spl is None) or r_corrected_values is None or len(r_corrected_values) == 0:
                 continue
@@ -738,11 +757,20 @@ class SpectroscopyProcessing:
             else:
                 values = r_corrected_values
 
-            ind_r = np.argsort(values['r'])
+            # Removing the edge points
+            #ind_w = np.argsort(values['w'])
+            #rdata = values[ind_w][100:-100]
+            ind_r = np.argsort(values) # np.argsort(rdata['r'])
             rdata = values[ind_r]
+            second_arg = data.derived['second_arg']
             if psf_2d_spl is not None:
-                #psf_eval = np.asarray(psf_2d_spl(rdata['r'], rdata['w'], grid=False), dtype=float)
-                psf_eval = np.asarray(psf_2d_spl(rdata['r'], spec_spl(rdata['w'])/np.median(spec_spl(rdata['w'])), grid=False), dtype=float)
+                if 'f' in second_arg:
+                    f = spec_spl(rdata['w'])
+                    f = f/np.median(f)
+                    print('max_f', np.max(f))
+                    psf_eval = np.asarray(psf_2d_spl(rdata['r'], f, grid=False), dtype=float)
+                else:
+                    psf_eval = np.asarray(psf_2d_spl(rdata['r'], rdata['w'], grid=False), dtype=float)
             else:
                 psf_eval = np.asarray(psf_spl(rdata['r']), dtype=float)
             model_flux = spec_spl(rdata['w']) * psf_eval
@@ -759,6 +787,7 @@ class SpectroscopyProcessing:
 
             corrected_table = rdata.copy()
             corrected_table['f'] = final_res
+
             # Shift to BRF
             barycorr = self._barycentric_correction_kms(j)
             #print(barycorr,'km/s')
@@ -782,7 +811,7 @@ class SpectroscopyProcessing:
         return dataset
     
     def correction_structures(self, dataset: Dataset):
-        """Correction of weird structure inside the image (applied to r-corrected values):"""
+        """Correction of weird structure inside the image"""
         correction_ranges = {
             'A11': ((165, 275), (300, 370)),
             'A12': ((7, 46),),
