@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 from file_manager import FileManager
 import scipy as sp
 from PyAstronomy import pyasl
+from pathlib import Path
 
 # First run the pipeline to get the master/epoch spectrum of one region 
 
@@ -26,7 +27,7 @@ def plot_spectrum(arr, min_w, max_w):
     plt.plot(w,f)
     plt.xlabel('Wavelength (nm)')
     plt.ylabel('Flux')
-    plt.title('AUmicspectrum')
+    plt.title('Spectrum')
     plt.show()
 
 def fit_spline(spec):
@@ -42,10 +43,31 @@ def fit_spline(spec):
         new_spec = np.column_stack((w, spec_spl(w)))
     return new_spec, spec_spl
 
-def fit_spline_master(master_spec):
-    w_master, f_master, master_weight = master_spec[:,0], master_spec[:,1], master_spec[:,2]
-    knots = np.arange(w_master[30], w_master[-30], 0.015)
-    return sp.interpolate.LSQUnivariateSpline(w_master, f_master, knots, master_weight)
+def fit_step(spec):
+    x = spec[:,0]
+    y = spec[:,1]
+    w = spec[:,2]
+    edges = np.arange(x[10], x[-10], 0.015)
+
+    # assign each x to a bin
+    idx = np.digitize(x, edges) - 1  # bin index 0..nbins-1
+    nbins = len(edges) - 1
+    num = np.zeros(nbins)
+    den = np.zeros(nbins)
+    for i in range(nbins):
+        mask = idx == i
+        if np.any(mask):
+            num[i] = np.sum(w[mask] * y[mask])
+            den[i] = np.sum(w[mask])
+    vals = np.divide(num, den, out=np.zeros_like(num), where=den != 0)
+
+    def step_fun(x_eval):
+        x_eval = np.asarray(x_eval)
+        idx_eval = np.digitize(x_eval, edges) - 1
+        idx_eval = np.clip(idx_eval, 0, nbins - 1)
+        return vals[idx_eval]
+
+    return step_fun, vals
 
 def remove_envelope(spec, min_w, max_w):
     w, f = spec[:,0], spec[:,1]
@@ -140,10 +162,11 @@ def align_spectra(model_spec, master_spec, vel_model, vel_master):
     return model_spec, master_spec
 
 if __name__ == '__main__':
-    region = 'A12'
+    region = 'A33'
     file_path_model = 'C:/Users/alice/Documents/Stage Suède/spec3700_45.npy'
     file_path_master = f'C:/Users/alice/Documents/Stage Suède/plots/master_spectrum/{region}/master_img.npy'
     file_path_epoch = f'C:/Users/alice/Documents/Stage Suède/plots/spectrum/{region}/000_epoch_spectrum.npy'
+    file_path_res = f'C:/Users/alice/Documents/Stage Suède/plots/residuals/{region}/0_residuals.npy'
     file_manager = FileManager('C:/Users/alice/Documents/Stage Suède/data/', region=region, nb_files=1)
 
     dataset = file_manager.load_data()
@@ -154,9 +177,15 @@ if __name__ == '__main__':
     model_spec = np.load(file_path_model, allow_pickle=True) # 2 columns (wavelength, flux)
     master_spec = np.load(file_path_master, allow_pickle=True) # 3 columns (wavelength, flux, weight)
     epoch_spec = np.load(file_path_epoch, allow_pickle=True) # 3 columns (wavelength, flux, weight)
+    res_spec = np.load(file_path_res, allow_pickle=True) # 3 columns (wavelength, flux, weight)
 
     epoch_spec = fit_spline(epoch_spec)[0]
-    #plot_spectrum(epoch_spec, min_w, max_w)
+    #res_spec, res_spl = fit_spline(res_spec)
+    res_spl = fit_step(res_spec)[0]
+    plt.plot(res_spec[:,0], res_spec[:,1], '.')
+    plt.plot(res_spec[:,0], res_spl(res_spec[:,0]), 'r')
+    plt.show()
+    #plot_spectrum(res_spec, min_w, max_w)
     epoch_spec = remove_envelope(epoch_spec, min_w, max_w)
     master_spec = remove_envelope(master_spec, min_w, max_w)
     model_spec = remove_envelope(model_spec, min_w-0.3, max_w+0.3) # larger bounds for better ccf
@@ -164,7 +193,7 @@ if __name__ == '__main__':
     model_spec, model_spec_spl = rot_broad(model_spec)
     master_spec_spl = fit_spline(master_spec)[1]
 
-    ccf_array_model, vel_model = ccf(epoch_spec, model_spec_spl, np.linspace(-20, 20, 1001), w_telluric, True)
+    ccf_array_model, vel_model = ccf(epoch_spec, model_spec_spl, np.linspace(-20, 20, 1001), w_telluric, False)
     ccf_array_master, vel_master = ccf(epoch_spec, master_spec_spl, np.linspace(-20, 20, 1001), w_telluric, False)
 
     print(f"Relative speed between epoch and model reference frames : {vel_model:.2f} km/s")
@@ -177,15 +206,48 @@ if __name__ == '__main__':
     model_spec_spl = fit_spline(model_spec)[1]
     master_spec_spl = fit_spline(master_spec)[1]
 
-    min_w = max(np.min(model_spec[:,0]), np.min(master_spec[:,0]), np.min(epoch_spec[:,0]))
-    max_w = min(np.max(model_spec[:,0]), np.max(master_spec[:,0]), np.max(epoch_spec[:,0]))
-    common_w = np.linspace(min_w, max_w, 1000)
+    min_w_T = max(np.min(model_spec[:,0]), np.min(master_spec[:,0]), np.min(epoch_spec[:,0]))
+    max_w_T = min(np.max(model_spec[:,0]), np.max(master_spec[:,0]), np.max(epoch_spec[:,0]))
+    common_w = np.linspace(min_w_T, max_w_T, 1000)
     tell_array = epoch_spec_spl(common_w) / model_spec_spl(common_w)
-    master_epoch_array = epoch_spec_spl(common_w) / master_spec_spl(common_w)
-    plt.plot(common_w, tell_array)
-    plt.xlabel('Wavelength [nm]')
-    plt.ylabel('epoch_spec / model_spec')
+
+    category_dir = Path(f'C:/Users/alice/Documents/Stage Suède/plots/tellurics/{region}')
+    category_dir.mkdir(parents=True, exist_ok=True)
+    np.save(f'{category_dir}/0_tellurics.npy', np.column_stack((common_w, tell_array)))
+
+    res_div_T = res_spl(common_w) / tell_array
+    fig, ax = plt.subplots(3, 1, sharex=True, figsize=(10, 7)) 
+    ax[0].plot(common_w, res_spl(common_w))
+    ax[0].set_ylabel('Corrected Flux')
+    ax[0].set_title('Residuals Spectrum')
+    ax[1].plot(common_w, res_div_T)
+    ax[1].set_ylabel('Corrected Flux')
+    ax[1].set_title('Residuals divided by telluric transmission')
+    ax[2].plot(common_w, tell_array)
+    ax[2].set_xlabel('Wavelength (nm)')
+    ax[2].set_ylabel('Telluric Spectrum')
     plt.show()
+    """plt.plot(common_w, res_div_T)
+    plt.xlabel('Wavelength [nm]')
+    plt.ylabel('res_spec / T')
+    plt.title('Residuals divided by telluric transmission')
+    plt.show()"""
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

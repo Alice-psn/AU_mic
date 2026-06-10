@@ -8,6 +8,7 @@ import numpy as np
 import scipy as sp
 import warnings
 import matplotlib.pyplot as plt
+from plotting import Plotter
 from PyAstronomy import pyasl
 
 try:
@@ -926,9 +927,11 @@ class SpectroscopyProcessing:
             else : 
                 for w_peak in w_telluric:
                     w_with_cut = w_with_cut[np.abs(w_with_cut - w_peak) > delta*np.max(w)+delta_w] # mask to cover tellurics move due to cross-correlation shift of master spectrum
-
+            # TEMPORARILY NO MASKING
+            #w_with_cut = np.asarray(w, dtype=float).copy()
+            print(w_telluric)
             for i, r_pos in enumerate(r_position):
-                spec_clump_spl = self._clump_spectrum(values, r_pos, dr) # residual spectrum at given r_pos position, extrapolation at edges, to use on restricted range
+                spec_clump_spl = self._clump_spectrum(data, values, r_pos, dr) # residual spectrum at given r_pos position, extrapolation at edges, to use on restricted range
                 # Plot residuals spectrum
                 """plt.plot(w_with_cut, spec_clump_spl(w_with_cut),'r.')
                 plt.title(f'Residuals spectrum around r={r_pos}')
@@ -936,6 +939,14 @@ class SpectroscopyProcessing:
                 # Shift mask back to ERF
                 #w_with_cut = self.doppler_shift(w_with_cut, barycorr_kms)
                 residuals_with_cut = spec_clump_spl(w_with_cut)
+                """if i==0:
+                    plt.plot(w_with_cut, residuals_with_cut,'r.')
+                    plt.show()"""
+                """tellurics = np.load(f'C:/Users/alice/Documents/Stage Suède/plots/tellurics/{data.region}/{data.epoch_index}_tellurics.npy', allow_pickle=True)
+                w_tell, tell_array = tellurics[:,0], tellurics[:,1]
+                tell_spl = sp.interpolate.LSQUnivariateSpline(w_tell, tell_array, np.arange(w_tell[10], w_tell[-10], 0.015)) # Create spline for telluric transmission
+                tell_array = tell_spl(w_with_cut)
+                residuals_with_cut = residuals_with_cut / tell_array"""
                 ccf_array = self.cross_correlation_velocity_clump(w_with_cut, residuals_with_cut, spec_spl, vel_array)
                 img_ccf_erf[i, :] = ccf_array
 
@@ -968,28 +979,52 @@ class SpectroscopyProcessing:
 
         return dataset
 
-    def _clump_spectrum(self, residual_values: np.ndarray, r_pos: float, dr: float):
+    @staticmethod
+    def fit_step(w, f, weight):
+        edges = np.arange(w[10], w[-10], 0.015)
+        idx = np.digitize(w, edges) - 1  # bin index 0..nbins-1
+        nbins = len(edges) - 1
+        num = np.zeros(nbins)
+        den = np.zeros(nbins)
+        for i in range(nbins):
+            mask = idx == i
+            if np.any(mask):
+                num[i] = np.sum(weight[mask] * f[mask])
+                den[i] = np.sum(weight[mask])
+        vals = np.divide(num, den, out=np.zeros_like(num), where=den != 0)
+
+        def step_fun(x_eval):
+            x_eval = np.asarray(x_eval)
+            idx_eval = np.digitize(x_eval, edges) - 1
+            idx_eval = np.clip(idx_eval, 0, nbins - 1)
+            return vals[idx_eval]
+        return step_fun, vals
+
+    def _clump_spectrum(self, data: Data, residual_values: np.ndarray, r_pos: float, dr: float):
         """
         Build spline of the residual spectrum at a position r_pos
         """
         ind = np.argsort(residual_values['w'])
         wdata_BRF = residual_values[ind]
         sel_dr = np.abs(wdata_BRF['r'] - r_pos) < dr
-        data = wdata_BRF[sel_dr]
+        res_data = wdata_BRF[sel_dr]
 
         step = float(self.params.get('step3_spec_resolution', 0.015))
-        w_min = data['w'][10]
-        w_max = data['w'][-10]
+        w_min = res_data['w'][10]
+        w_max = res_data['w'][-10]
         knots = np.arange(w_min, w_max, step)
 
         with np.errstate(divide='ignore', invalid='ignore'):
-            weight = (1.0 / data['e']) ** 2
+            weight = (1.0 / res_data['e']) ** 2
         weight[~np.isfinite(weight)] = 0.0
-        spec_clump_spl = sp.interpolate.LSQUnivariateSpline(data['w'], data['f'], knots, weight)
-        """plt.plot(data['w'], spec_clump_spl(data['w']),'r')
-        plt.plot(data['w'],data['f'],'b.')
+        #spec_clump_spl = self.fit_step(res_data['w'], res_data['f'], weight)[0]
+        spec_clump_spl = sp.interpolate.LSQUnivariateSpline(res_data['w'], res_data['f'], knots, weight, k=3)
+        """plt.plot(res_data['w'], spec_clump_spl(res_data['w']),'r')
+        plt.plot(res_data['w'],res_data['f'],'b.')
         plt.title(f'Residuals spectrum around r={r_pos}')
         plt.show()"""
+        plotter = Plotter('save','C:/Users/alice/Documents/Stage Suède/plots/')
+        plotter.send_residuals(data, residual_values, r_pos, dr)
         return spec_clump_spl
         
     @staticmethod

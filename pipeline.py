@@ -63,7 +63,7 @@ def run_step1_2(dataset, spec_process, plotter):
     spec_process.final_residuals(dataset)
     plotter.plot_residuals_dataset(dataset,'Final Residuals')
 
-    spec_process.ccf_image_separation_velocity(dataset,'master')
+    spec_process.ccf_image_separation_velocity(dataset,'model')
     plotter.plot_velocity_separation_image(dataset)
 
 def run_step4(dataset_A,dataset_B,spec_process,plotter):

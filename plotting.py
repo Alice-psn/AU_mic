@@ -10,7 +10,7 @@ from pathlib import Path
 import re
 import scipy as sp
 
-from spectroscopy_processing import SpectroscopyProcessing
+#from spectroscopy_processing import SpectroscopyProcessing
 
 class Plotter:
     """A class to handle plotting of various stages of the AU Mic pipeline.
@@ -76,11 +76,11 @@ class Plotter:
     def plot_initial_data(self, dataset:Dataset):
         """ Plot the initial flux data for each file in the dataset
         """
-        for data in dataset.items:
-            img = SpectroscopyProcessing.make_image(data)
-            file_path = data.file_id
-            self.plot_image(img, data, fmin=data.stats['fmin'], fmax=data.stats['fmax'],
-                            title=f"Flux data {file_path} as function of pixels ", show_colorbar=True)
+        #for data in dataset.items:
+            #img = SpectroscopyProcessing.make_image(data)
+            #file_path = data.file_id
+            #self.plot_image(img, data, fmin=data.stats['fmin'], fmax=data.stats['fmax'],
+                            #title=f"Flux data {file_path} as function of pixels ", show_colorbar=True)
 
     """
     ************ Spectra *************
@@ -578,6 +578,25 @@ class Plotter:
             fig.set_figwidth(10)
 
             self._emit_figure(fig, category='step3_velocity_separation', filename=f'velocity_separation_{data.file_id}', region=data.region)
+
+    def send_residuals(self, data, residuals, r_pos, dr):
+        if self.output_mode == 'off':
+            return
+        ind = np.argsort(residuals['w'])
+        wdata_BRF = residuals[ind]
+        sel_dr = np.abs(wdata_BRF['r'] - r_pos) < dr
+        res_data = wdata_BRF[sel_dr]
+        if residuals is not None:
+            category_dir = self.output_root / 'residuals'
+            category_dir = category_dir / self._safe_name(data.region)
+            category_dir.mkdir(parents=True, exist_ok=True)
+            residuals_arr = np.empty((len(res_data), 3))
+            residuals_arr[:, 0] = res_data['w']
+            residuals_arr[:, 1] = res_data['f']
+            residuals_arr[:, 2] = (1.0 / res_data['e']) ** 2
+            path = category_dir / f"{data.epoch_index}_residuals.npy"
+            if not path.exists():
+                np.save(path, residuals_arr)
 
     def _plot_step4_map(self, img_ccf: np.ndarray, r_position: np.ndarray, vel_array: np.ndarray, title: str, region: str | None = None):
         if self.output_mode == 'off':
